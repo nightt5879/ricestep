@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param()
+param([switch]$SdkOnly)
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
@@ -19,5 +19,22 @@ $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowe
 if ($actualHash -ne $Toolchain.sdk.sha256) {
     throw 'SDK archive checksum mismatch. No downloaded executable was run.'
 }
-Expand-Archive -LiteralPath $archive -DestinationPath $toolsDirectory -Force
+Expand-ToolArchive -Archive $archive -Destination $toolsDirectory
 Write-Host "SDK $($Toolchain.sdk.tag) verified and installed: $(Get-SimulatorPath)"
+
+if (-not $SdkOnly) {
+    $adbArchive = Join-Path $cache $Toolchain.adb.asset
+    if (-not (Test-Path -LiteralPath $adbArchive)) {
+        Invoke-WebRequest -Uri $Toolchain.adb.url -OutFile $adbArchive -TimeoutSec 60
+    }
+    $adbHash = (Get-FileHash -LiteralPath $adbArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+    $adbSha1 = (Get-FileHash -LiteralPath $adbArchive -Algorithm SHA1).Hash.ToLowerInvariant()
+    if ($adbHash -ne $Toolchain.adb.sha256 -or $adbSha1 -ne $Toolchain.adb.upstreamSha1) {
+        throw 'ADB archive checksum mismatch. No downloaded executable was run.'
+    }
+    Expand-ToolArchive -Archive $adbArchive -Destination $toolsDirectory
+    $adb = Get-AdbPath
+    & $adb version
+    if ($LASTEXITCODE -ne 0) { throw 'ADB failed to start.' }
+    Write-Host "Android Platform Tools $($Toolchain.adb.version) verified and installed."
+}

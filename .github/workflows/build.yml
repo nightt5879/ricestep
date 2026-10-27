@@ -17,7 +17,7 @@ jobs:
       - name: Install pinned official SDK
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/setup.ps1
+        run: ./scripts/setup.ps1 -SdkOnly
       - name: Validate and build Lua miniapp
         run: ./scripts/build.ps1
       - name: Upload application and rendered preview

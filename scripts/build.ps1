@@ -14,7 +14,7 @@ $preview = Join-Path $RepoRoot "dist/preview-$([Guid]::NewGuid().ToString('N')).
 try {
     Invoke-Headless -Source $source -Image $preview
     $bytes = [IO.File]::ReadAllBytes($preview)
-    if ($bytes.Length -lt 24 -or [Convert]::ToHexString($bytes[0..7]) -ne '89504E470D0A1A0A') {
+    if ($bytes.Length -lt 24 -or [BitConverter]::ToString($bytes, 0, 8) -ne '89-50-4E-47-0D-0A-1A-0A') {
         throw 'Simulator output is not a valid PNG header.'
     }
     $width = [uint32]$bytes[16] * 16777216 + [uint32]$bytes[17] * 65536 + [uint32]$bytes[18] * 256 + $bytes[19]

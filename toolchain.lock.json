@@ -9,5 +9,14 @@
     "sha256": "1c6ec88da669d05e1129bf13996677e88dd195726ba8bb2614aeedadebf047e8",
     "directory": "LingClaw-SDK-0.1.0-windows-x64",
     "minimumAppApi": 2
+  },
+  "adb": {
+    "version": "37.0.1",
+    "asset": "platform-tools_r37.0.1-win.zip",
+    "url": "https://dl-ssl.google.com/android/repository/platform-tools_r37.0.1-win.zip",
+    "metadataUrl": "https://dl-ssl.google.com/android/repository/repository2-1.xml",
+    "upstreamSha1": "e03e78b1d80b396f1c3358e31251cb31740e1110",
+    "sha256": "45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99",
+    "directory": "platform-tools"
   }
 }

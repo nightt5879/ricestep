@@ -22,6 +22,13 @@
       "command": "pwsh",
       "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/dev.ps1"],
       "problemMatcher": []
+    },
+    {
+      "label": "RiceStep: list devices",
+      "type": "process",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/devices.ps1"],
+      "problemMatcher": []
     }
   ]
 }

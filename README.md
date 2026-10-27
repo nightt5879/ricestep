@@ -6,7 +6,7 @@ Arcs Mini（LS26）小应用开发仓库。项目名暂定；本轮先完成 Win
 
 ## 本机开始开发
 
-环境：Windows x64、PowerShell 7、Git、已登录的 GitHub CLI。官方 LingClaw SDK `v0.1.0` 固定版本和 SHA-256 见 `toolchain.lock.json`。
+环境：Windows x64、PowerShell 7、Git、已登录的 GitHub CLI。官方 LingClaw SDK `v0.1.0`、Android Platform Tools `37.0.1` 的固定版本和校验和见 `toolchain.lock.json`。
 
 在仓库根目录执行：
 
@@ -16,11 +16,21 @@ pwsh -File scripts/build.ps1
 pwsh -File scripts/dev.ps1
 ```
 
-`setup` 下载并校验官方 Windows 模拟器，安装到仓库内 `.tools/`。再次执行会复用下载缓存，不修改系统 PATH。
+`setup` 下载并校验官方 Windows 模拟器及 Google ADB，安装到仓库内 `.tools/`。再次执行会复用下载缓存，不修改系统 PATH。只需模拟器时加 `-SdkOnly`；CI 使用该选项，不连接硬件。
 
 `build` 用官方模拟器加载 Lua，执行启动和 50 次更新，检查退出状态及 240×240 PNG，再生成 `dist/ricestep.lua`、`dist/preview.png` 与构建信息。Lua 是解释执行，构建产物仍是 Lua 源码。
 
 `dev` 打开交互模拟器，编辑 `app/main.lua` 并保存即可热重载。点击画面后按空格增加按键计数，Ctrl+R 重载清零。VS Code 也可通过“运行任务”调用这三个命令，Ctrl+Shift+B 执行构建。
+
+连接支持 ADB 的开发板后，检查连接：
+
+```powershell
+pwsh -File scripts/devices.ps1
+```
+
+设备列表为空时，模拟器开发仍可继续。请检查 USB 数据线、实际板型与设备调试状态。此命令只列出连接设备，不上传小应用。
+
+后续实机上传命令及当前验收情况见 [设备联调](docs/device-setup.md)。
 
 ## 文件说明
 
