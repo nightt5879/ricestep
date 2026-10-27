@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>肥鱼饭搭子 · 外观与声音预览</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f1e9;color:#233d61;font:16px/1.65 system-ui,"Microsoft YaHei",sans-serif}main{max-width:900px;margin:0 auto;padding:40px 24px}h1{font-size:32px;margin:0 0 6px}h2{font-size:18px;margin:0 0 14px}p{margin:0 0 22px}.muted{color:#657888}.preview{display:grid;grid-template-columns:300px 1fr;gap:36px;align-items:start;margin:30px 0}.stage{background:#fff5e5;border-radius:24px;text-align:center;padding:18px 18px 24px;box-shadow:0 12px 40px #233d6112}.stage canvas{display:block;width:240px;height:240px;margin:auto;image-rendering:pixelated}.caption{min-height:62px;margin:0;font-size:17px}.eyebrow{font-size:13px;letter-spacing:1px;color:#617c8c}.scenes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:20px}button{font:inherit;color:inherit;background:#fffdf8;border:1px solid #dedfd9;border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left}button:hover{background:#eaf1ee}button:focus-visible{outline:3px solid #399ab2;outline-offset:2px}button[aria-pressed=true]{background:#233d61;color:white;border-color:#233d61}.speech{padding:16px 0;border-top:1px solid #d8dedb}.speech p{margin:0 0 10px;min-height:52px}audio{width:100%;height:38px}.catalog{margin-top:12px}summary{cursor:pointer}select{font:inherit;padding:7px;margin:10px 0;width:100%;color:inherit;background:#fffdf8;border:1px solid #d8dedb;border-radius:7px}.future{border-top:1px solid #d8dedb;padding-top:22px}.future p{margin-bottom:8px}footer{font-size:13px;color:#657888;padding-top:20px}@media(max-width:640px){main{padding:24px 18px}.preview{grid-template-columns:1fr;gap:24px}.stage{width:300px;max-width:100%;margin:auto}h1{font-size:27px}.stage canvas{max-width:100%;height:auto}}
+</style>
+</head>
+<body><main>
+<div class="eyebrow">肥鱼饭搭子 / 2026.10.27</div>
+<h1>你认真忙，我认真等饭。</h1>
+<p class="muted">外观与声音预览。使用板上同一套像素素材和配音，可离线打开；这里的切换不会操作开发板。</p>
+<section class="preview" aria-label="角色与声音预览">
+ <div class="stage"><div class="eyebrow" id="scene-name">等开饭</div><canvas id="pet" width="240" height="240" role="img" aria-label="肥鱼抱着期待等开饭">肥鱼像素角色</canvas><p class="caption" id="caption"></p></div>
+ <div><h2>看看她的小反应</h2><div class="scenes" id="scenes"></div>
+ <div class="speech"><div class="eyebrow">当前台词</div><p id="line" aria-live="polite"></p><audio id="player" controls preload="none" aria-label="试听肥鱼配音"></audio><p id="audio-status" class="muted" aria-live="polite"></p></div>
+ <details class="catalog"><summary>全部14句配音</summary><label for="voice-list">选择台词</label><select id="voice-list"></select><button type="button" id="play-selected">试听这句</button></details>
+ </div>
+</section>
+<section class="future"><h2>下一阶段的想法：你做运动，她赚口粮</h2><p>摄像头识别完整动作 → 赚米饭 → 喂肥鱼。先验证俯卧撑，再研究波比跳。</p><p class="muted">这是后续构想，目前没有启用摄像头或实现运动识别。今晚先看已完成的表情、声音、煮饭和上一锅记忆。</p></section>
+<footer>这是外观与声音展览，不是完整小游戏模拟器；不连接设备、不采集影像。正式玩法仍在开发板与官方模拟器中。</footer>
+</main>
+<script>
+const DATA = /*__RICE_PREVIEW_DATA__*/null;
+const scenes = [
+ {name:'等开饭',pose:1,clip:'hello',caption:'我在等饭，没在发呆'},
+ {name:'喂她一口',pose:5,clip:'feed',caption:'啊呜……再一口，就一口',eat:true},
+ {name:'煮出好饭',pose:5,clip:'perfect',caption:'诶嘿，香的！这碗归我',eat:true},
+ {name:'不小心煮糊',pose:6,clip:'burnt',caption:'呃……饭好像晒黑了'},
+ {name:'记得上次那锅',pose:6,clip:'remember_burnt',caption:'上次饭晒黑了，这回盯紧'},
+ {name:'陪你专注',pose:4,clip:'focus_start',caption:'你认真忙，我认真等饭'},
+ {name:'抱碗打盹',pose:4,clip:null,caption:'碗先抱着，饭来了叫我'},
+ {name:'发现小收藏',pose:3,clip:null,caption:'今天又攒到一点小开心'}
+];
+const canvas=document.getElementById('pet'),ctx=canvas.getContext('2d'),player=document.getElementById('player');
+const line=document.getElementById('line'),status=document.getElementById('audio-status');
+let timers=[];
+function color(n){return '#'+n.toString(16).padStart(6,'0')}
+function draw(pose){
+ ctx.fillStyle='#fff5e5';ctx.fillRect(0,0,240,240);
+ ctx.fillStyle='#dceff0';ctx.fillRect(62,193,116,3);
+ const f=DATA.frames[pose-1];
+ for(const [x,y,w,h,c] of f.rects){
+  const x1=72+Math.floor(x*96/f.w),y1=63+Math.floor(y*120/f.h);
+  const x2=72+Math.floor((x+w)*96/f.w),y2=63+Math.floor((y+h)*120/f.h);
+  ctx.fillStyle=c===0?'#fff5e5':color(DATA.palette[c-1]);ctx.fillRect(x1,y1,x2-x1,y2-y1);
+ }
+}
+function audioClip(id,play){
+ player.pause();status.textContent='';
+ const clip=DATA.clips[id];
+ if(!clip){player.removeAttribute('src');player.load();player.hidden=true;line.textContent='她安静地陪着你。';return}
+ player.hidden=false;player.src=clip.src;line.textContent=clip.text;document.getElementById('voice-list').value=id;
+ if(play)player.play().catch(()=>{status.textContent='点击播放器的播放键即可试听。'});
+}
+function selectScene(index,play){
+ timers.forEach(clearTimeout);timers=[];
+ const s=scenes[index];document.getElementById('scene-name').textContent=s.name;
+ document.getElementById('caption').textContent=s.caption;canvas.setAttribute('aria-label',s.name+'：'+s.caption);
+ document.querySelectorAll('#scenes button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));
+ draw(s.pose);audioClip(s.clip,play);
+ if(s.eat&&!matchMedia('(prefers-reduced-motion: reduce)').matches){timers.push(setTimeout(()=>draw(2),700),setTimeout(()=>draw(4),4200))}
+}
+scenes.forEach((s,i)=>{const b=document.createElement('button');b.type='button';b.textContent=s.name;b.setAttribute('aria-pressed','false');b.onclick=()=>selectScene(i,true);document.getElementById('scenes').append(b)});
+for(const [id,clip]of Object.entries(DATA.clips)){const option=document.createElement('option');option.value=id;option.textContent=clip.text;document.getElementById('voice-list').append(option)}
+document.getElementById('play-selected').onclick=()=>audioClip(document.getElementById('voice-list').value,true);
+player.addEventListener('error',()=>{status.textContent='当前浏览器未能播放，可换用 Chrome、Edge 或 Safari 打开。'});
+selectScene(0,false);
+</script></body></html>
