@@ -1,56 +1,72 @@
 # RiceStep · 肥鱼开饭
 
-Arcs Mini（LS26）小应用开发仓库。项目名暂定；本轮先完成 Windows 开发环境，不展开玩法实现。
+把专注和散步变成喂给鲸鱼娘的一碗饭。面向 **Arcs Mini3 / 固件 3.1.0** 的 Lua 小应用，240×240 像素界面。
 
-当前入口是环境验收程序：240×240 屏幕、启动状态、功能键计数。计数表示按键次数，不是步数。
+## 基础版玩法
 
-## 本机开始开发
+- **喂饭**：初始3碗，双击喂一碗；角色吃饭、短音效和语音反馈。饱腹时温和拒绝，不会饿死或扣除已有收藏。
+- **专注**：25分钟番茄钟，支持暂停、继续和提前结束确认；完整完成获得1碗饭。这是专注时长奖励，不计入步数。
+- **散步**：已准备“iPhone健康步数 → 本机中继 → 肥鱼”接入。500个新增真实步数换1碗，零头留到下次；有奖励的散步还会发现纪念品。需要先完成手机授权和同步，未接入时显示等待。
+- **背包**：6种随机纪念品。出发前同步建立基线，断网时保留散步会话，回家同步后结算；重复同步不重复领奖。
+- **存档**：按SDK约束节流保存，最多保留30天。运行中的任务在重载后恢复为暂停，避免把离线时长当作专注或步行。
 
-环境：Windows x64、PowerShell 7、Git、已登录的 GitHub CLI。官方 LingClaw SDK `v0.1.0`、Android Platform Tools `37.0.1` 的固定版本和校验和见 `toolchain.lock.json`。
+只有一个功能键：**单击切换选项，双击确认**。长按仍属于系统操作。背包中单击翻页、双击回家。
 
-在仓库根目录执行：
+角色参考来自用户提供的鲸鱼娘形象。三态原图通过 built-in imagegen 生成，提示词和来源说明见[角色素材](assets/generated/README.md)。这是社区二创项目，不宣称官方 DeepSeek 产品。
+
+## 构建、预览与测试
+
+需要 Windows x64、PowerShell 7、Node.js 20+、Git 和已登录的 GitHub CLI。
 
 ```powershell
 pwsh -File scripts/setup.ps1
 pwsh -File scripts/build.ps1
+pwsh -File scripts/test.ps1
 pwsh -File scripts/dev.ps1
 ```
 
-`setup` 下载并校验官方 Windows 模拟器及 Google ADB，安装到仓库内 `.tools/`。再次执行会复用下载缓存，不修改系统 PATH。只需模拟器时加 `-SdkOnly`；CI 使用该选项，不连接硬件。
+`setup` 将固定版本官方SDK和Google ADB放在 `.tools/`，校验哈希，不修改系统PATH。`dev` 打开模拟器并监控 `app/*.lua`，保存后重新打包；Ctrl+C停止监控，`-NoWatch`只打开一次。VS Code构建任务也可调用这些命令。
 
-`build` 用官方模拟器加载 Lua，执行启动和 50 次更新，检查退出状态及 240×240 PNG，再生成 `dist/ricestep.lua`、`dist/preview.png` 与构建信息。Lua 是解释执行，构建产物仍是 Lua 源码。
+源码分模块维护，构建时拼接、压紧为一个 `dist/ricestep.lua`，符合设备无 `require/package` 的环境。产物另含 `dist/preview.png` 和构建信息。输出、工具、设备备份、步数及配对token均不提交。
 
-`dev` 打开交互模拟器，编辑 `app/main.lua` 并保存即可热重载。点击画面后按空格增加按键计数，Ctrl+R 重载清零。VS Code 也可通过“运行任务”调用这三个命令，Ctrl+Shift+B 执行构建。
+旧官方模拟器只提供API4和128矩形，预览使用低细节角色；**Mini3固件3.1.0的API5使用32×40逻辑像素角色和256形状额度**。角色图形由生成的位图编译，不依赖设备读取PNG。桌面预览不等同于真机验证。
 
-连接支持 ADB 的开发板后，检查连接：
+## 上板
 
 ```powershell
 pwsh -File scripts/devices.ps1
+pwsh -File scripts/deploy.ps1 -Serial YOUR_BOARD_SERIAL
 ```
 
-设备列表为空时，模拟器开发仍可继续。请检查 USB 数据线、实际板型与设备调试状态。此命令只列出连接设备，不上传小应用。
+部署先构建和备份当前小应用，再上传、回读并比对源码哈希；上传立即替换运行中的小应用。备份仅在 `.cache/device-backup/`。调试源码在设备重启后需重新上传；存档遵循SDK有效期规则。
 
-后续实机上传命令及当前验收情况见 [设备联调](docs/device-setup.md)。
+## 手机真实步数
 
-## 文件说明
+[手机接入说明](docs/phone-steps.md)包含本机服务与iPhone快捷指令步骤。只有用户在手机明确授权后才读取健康步数。当前代码和合成数据测试已完成，实际手机链路还需授权和验证；这不是板载计步。
 
-| 路径 | 用途 |
+## 修改角色素材
+
+已编译的 `app/character.lua` 可直接构建。修改源图或编码时：
+
+```powershell
+npm ci --ignore-scripts
+npm run assets
+pwsh -File scripts/build.ps1
+```
+
+源图、像素编码器、逐像素一致性测试和编译统计一同保留。每帧角色最多230形状，为界面留出额度。启动采用紧凑字串，避免大量Lua表导致真机启动超时。
+
+## 目录
+
+| 路径 | 内容 |
 | --- | --- |
-| `app/main.lua` | 最小可运行入口 |
-| `scripts/` | 安装、构建和启动命令 |
-| `toolchain.lock.json` | 官方 SDK 版本、来源、校验和 |
-| `docs/smoke-test.md` | 手动验收步骤与执行记录 |
-| `.github/workflows/build.yml` | Windows 云端构建，保存 Lua 与预览产物 |
-| `.tools/` / `.cache/` | 本机工具与下载缓存，不提交 |
-| `dist/` | 构建输出，不提交 |
+| `app/game.lua` | 喂食、专注、散步、奖励和存档规则 |
+| `app/main.lua` | 界面、单键交互和声音反馈 |
+| `app/character.lua` | 已编译角色三态 |
+| `app/step-sync.lua` | 可选的局域网步数同步 |
+| `scripts/` | 安装、构建、测试、上板、素材编译、中继 |
+| `tests/` | Lua规则与交互、本机步数协议测试 |
+| `assets/generated/` | imagegen源素材、提示词与编码统计 |
+| `docs/verification.md` | 验证证据与待完成检查 |
 
-## 官方资料
-
-- [固定版本源码](https://github.com/LISTENAI/LingClaw-SDK/tree/eff009e242cd748f1ba7a9cd3001b72b1de38298)
-- [v0.1.0 官方发布包](https://github.com/LISTENAI/LingClaw-SDK/releases/tag/v0.1.0)
-- [模拟器与无界面运行](https://github.com/LISTENAI/LingClaw-SDK/blob/eff009e242cd748f1ba7a9cd3001b72b1de38298/docs/simulator.md)
-- [设备联调说明](https://github.com/LISTENAI/LingClaw-SDK/blob/eff009e242cd748f1ba7a9cd3001b72b1de38298/docs/getting-started.md)
-
-发布包包含 Lua 运行时、示例和 API 文档，无需安装 Rust 或 WSL。只有修改模拟器本身时，才需要官方源码构建环境。SDK API 版本与设备固件版本是不同编号。
-
-目前还没有真实硬件计步、设备上传或固件刷写结果。具体板型与传感器接口后续单独确认。
+依赖见 `toolchain.lock.json`。官方依据：[LingClaw SDK](https://github.com/LISTENAI/LingClaw-SDK)、[Mini3固件](https://docs2.listenai.com/x/AL2O8BGTO)、[设备联调](https://github.com/LISTENAI/LingClaw-SDK/blob/eff009e242cd748f1ba7a9cd3001b72b1de38298/docs/getting-started.md)。

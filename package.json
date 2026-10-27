@@ -1,0 +1,11 @@
+{
+  "name": "ricestep",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Asset compiler and local step relay for RiceStep",
+  "scripts": {
+    "assets": "node scripts/compile-character.cjs"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": { "pngjs": "7.0.0" }
+}

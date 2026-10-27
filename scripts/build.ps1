@@ -3,12 +3,30 @@
 param()
 . (Join-Path $PSScriptRoot 'common.ps1')
 
-$source = Join-Path $RepoRoot 'app/main.lua'
-$sourceSize = (Get-Item -LiteralPath $source).Length
-if ($sourceSize -gt 65536) { throw 'Lua source exceeds the SDK default 64 KiB limit.' }
-$sourceText = [IO.File]::ReadAllText($source)
-if ([string]::IsNullOrWhiteSpace($sourceText)) { throw 'Lua source is empty.' }
 $null = New-Item -ItemType Directory -Path (Join-Path $RepoRoot 'dist') -Force
+$source = Join-Path $RepoRoot "dist/build-$([Guid]::NewGuid().ToString('N')).lua"
+$prefix = "-- RiceStep bundle; edit app/*.lua instead.`nRICESTEP_CONFIG={tts_enabled=true}`n"
+$localConfig = Join-Path $RepoRoot '.local-config.json'
+if (Test-Path -LiteralPath $localConfig) {
+    $configuration = Get-Content -LiteralPath $localConfig -Raw | ConvertFrom-Json
+    if ($configuration.PSObject.Properties.Name -contains 'step_url' -and $configuration.step_url) {
+        $url = [uri]$configuration.step_url
+        if (-not $url.IsAbsoluteUri -or $url.Scheme -notin @('http', 'https') -or $url.UserInfo -or $url.AbsoluteUri.Length -gt 511) {
+            throw 'step_url must be an absolute HTTP(S) URL without credentials, at most 511 bytes.'
+        }
+        $prefix += "RICESTEP_CONFIG.step_url=[===[$($url.AbsoluteUri)]===]`n"
+    }
+}
+$sourceText = $prefix
+foreach ($module in @('game.lua', 'character.lua', 'main.lua', 'step-sync.lua')) {
+    $sourceText += "`n-- Module: $module`n" + [IO.File]::ReadAllText((Join-Path $RepoRoot "app/$module")) + "`n"
+}
+$sourceSize = [Text.Encoding]::UTF8.GetByteCount($sourceText)
+if ($sourceSize -gt 65536) { throw 'Bundled Lua source exceeds the SDK default 64 KiB limit.' }
+[IO.File]::WriteAllText($source, $sourceText, [Text.UTF8Encoding]::new($false))
+& node (Join-Path $PSScriptRoot 'minify-lua.cjs') $source
+if ($LASTEXITCODE -ne 0) { throw 'Lua source compaction failed.' }
+$sourceSize = (Get-Item -LiteralPath $source).Length
 # New output name prevents a stale screenshot from passing a failed render.
 $preview = Join-Path $RepoRoot "dist/preview-$([Guid]::NewGuid().ToString('N')).png"
 try {
@@ -34,4 +52,5 @@ try {
     Write-Host 'Build passed: dist/ricestep.lua, dist/preview.png, dist/build-info.json'
 } finally {
     if (Test-Path -LiteralPath $preview) { Remove-Item -LiteralPath $preview }
+    if (Test-Path -LiteralPath $source) { Remove-Item -LiteralPath $source }
 }

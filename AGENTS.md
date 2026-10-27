@@ -4,8 +4,10 @@
 - This is a LingClaw Lua miniapp. Use APIs documented in the pinned official SDK.
 - Keep tool versions and archive SHA-256 hashes in `toolchain.lock.json`.
 - Do not commit downloaded tools, build outputs, credentials, device serials, or private device data.
-- Run `pwsh -File scripts/build.ps1` after Lua or build changes. Check the rendered preview when changing UI.
+- Run `pwsh -File scripts/build.ps1` after Lua or build changes; run `scripts/test.ps1` for logic and interaction changes. Check rendered previews when changing UI.
 - Use `pwsh -File scripts/dev.ps1` for real window/input checks; headless rendering does not prove GUI input or physical hardware support.
-- Preserve the user's preference for a carried device that counts steps itself. Sensor availability and exact board revision remain unverified.
+- The device is confirmed as Arcs Mini3, firmware 3.1.0, Lua API 5, 256 shapes/frame. The old desktop simulator is API 4 with 128 rectangles, so it uses lower-detail art.
+- Preserve the user's preference for real walking steps. No board motion-sensor API was found. Never present timers, key clicks or test samples as measured steps.
+- Source art is encoded into compact character strings; regenerate with `npm run assets`. Device startup rejected the original large-table form.
 - Keep environment setup separate from device deployment. ADB upload immediately replaces the current miniapp.
 - Save verified, coherent changes in commits; do not claim a build or physical test that was not run.

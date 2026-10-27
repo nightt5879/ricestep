@@ -9,3 +9,5 @@ work/
 device-app*.lua
 Thumbs.db
 .DS_Store
+node_modules/
+.local-config.json
