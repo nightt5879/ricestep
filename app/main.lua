@@ -5,6 +5,7 @@ local uptime, draw_elapsed, click_at, tick_count = 0, 0, nil, 0
 local toast, toast_until, animation_pose, animation_until = "", 0, 1, 0
 local dirty, last_save, save_error, speech_id = false, 0, nil, nil
 local step_sample, step_base, step_offset, step_day = nil, nil, 0, nil
+local step_restore_pending = false
 local step_status, last_result = "waiting", nil
 local BG, INK, MUTED, BLUE = 0xFFF5E5, 0x233D61, 0x6F8395, 0x399AB2
 local CARD, LIGHT, GOLD, WHITE = 0xFFFBF3, 0xDCEFF0, 0xD7A749, 0xFFFFFF
@@ -42,6 +43,15 @@ end
 local function fresh_steps()
     return step_status == "ready" and step_sample ~= nil and uptime - step_sample.at <= 90000
 end
+local function valid_step_day(value)
+    if type(value) ~= "string" then return false end
+    local year, month, day = value:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    year, month, day = tonumber(year), tonumber(month), tonumber(day)
+    if not year or year < 1 or month < 1 or month > 12 or day < 1 then return false end
+    local days = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+    if year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0) then days[2] = 29 end
+    return day <= days[month]
+end
 local function header(title, state)
     screen.begin(BG)
     screen.text(title, 12, 10, INK)
@@ -77,8 +87,8 @@ local function focus_labels(state)
     return {state.focus_status == "claimed" and "再来" or "开始", "回家"}
 end
 local function walk_labels(state)
-    if state.status == "active" then return {"暂停", "结束"} end
-    if state.status == "paused" then return {"继续", "结束"} end
+    if state.status == "active" then return {"结束", "回家"} end
+    if state.status == "paused" then return {"继续", "结束", "回家"} end
     return {"出发", "回家"}
 end
 local function draw_item(index, owned)
@@ -158,16 +168,26 @@ local function draw()
         if state.status == "active" and not fresh_steps() then hint = "回家同步后结算"
         elseif step_status == "offline" then hint = "步数同步已断开"
         elseif step_status == "invalid" then hint = "步数数据暂不可用"
-        elseif state.status == "paused" then hint = "已暂停，随时继续" end
+        elseif state.status == "paused" then hint = step_restore_pending and "同步后恢复本次散步" or "同步后继续，重新计步" end
         centered(headline(hint), 40, INK)
         character(1, true)
         local count = active and state.step_count or (step_sample and step_sample.total or nil)
         local count_label = active and (fresh_steps() and "本次 " or "已同步 ") or "今日同步 "
         centered(count and (count_label .. count .. " 步") or "尚未接入步数", 142, INK)
         local remaining = state.steps_per_rice - ((state.step_carry + (active and state.step_count or 0)) % state.steps_per_rice)
-        centered(state.status == "active" and not fresh_steps() and "回家联网，领取米饭" or
-            ("再走" .. remaining .. "步，攒一碗饭"), 163, MUTED)
+        if state.status ~= "paused" then
+            centered(state.status == "active" and not fresh_steps() and "回家联网，领取米饭" or
+                ("再走" .. remaining .. "步，攒一碗饭"), 163, MUTED)
+        end
+        selection = math.min(selection, #walk_labels(state))
         actions(walk_labels(state), selection)
+    elseif page == "walk_confirm" then
+        header("结束这次散步吗", state)
+        centered("只结算已同步的步数", 40, INK)
+        character(1, true)
+        centered("已同步 " .. state.step_count .. " 步", 146, INK)
+        centered("未同步的步数不会计入", 166, MUTED)
+        actions({"返回散步", "确认结束"}, selection)
     elseif page == "bag" then
         header("旅行背包", state)
         centered("已收集 " .. state.collection_count .. " / 6", 39, MUTED)
@@ -204,6 +224,16 @@ local function baseline_steps()
     step_base, step_offset, step_day = step_sample.total, game.snapshot().step_count, step_sample.day
     return true
 end
+local function settle_walk()
+    local ok, reason = game.finish_walk()
+    if not ok then error_message(reason); return end
+    local claimed, result = game.claim_walk()
+    if not claimed then error_message(result); return end
+    dirty, last_result, step_restore_pending = true, result, false
+    message(result.rice_added > 0 and "今天的散步，开饭啦" or "今天也多走了一点点")
+    if result.item > 0 then animate(3); sound(659, 90) end
+    set_page("summary")
+end
 local function choose()
     local state = game.snapshot()
     if page == "home" then
@@ -235,31 +265,23 @@ local function choose()
         if selection == 2 then game.cancel_focus(); dirty = true; message("休息一下，也很好") end
         set_page("focus")
     elseif page == "walk" then
-        local choice = walk_labels(state)[selection]
+        local labels = walk_labels(state)
+        selection = math.min(selection, #labels)
+        local choice = labels[selection]
         if choice == "回家" then set_page("home")
-        elseif choice == "暂停" then game.pause_walk(); dirty = true
         elseif choice == "继续" then
-            if baseline_steps() then game.resume_walk(); dirty = true end
+            if step_restore_pending then message("同步手机，恢复本次步数")
+            elseif baseline_steps() then game.resume_walk(); dirty = true end
         elseif choice == "结束" then
-            if not fresh_steps() then message("先同步步数，再收下米饭")
-            else
-                local ok, reason = game.finish_walk()
-                if ok then
-                    local claimed, result = game.claim_walk()
-                    if claimed then
-                        dirty, last_result = true, result
-                        message(result.rice_added > 0 and "今天的散步，开饭啦" or "今天也多走了一点点")
-                        if result.item > 0 then animate(3); sound(659, 90) end
-                        set_page("summary")
-                    else error_message(result) end
-                else error_message(reason) end
-            end
+            if not fresh_steps() then set_page("walk_confirm") else settle_walk() end
         else
             if fresh_steps() then
                 local ok, reason = game.start_walk("sensor")
                 if ok then baseline_steps(); dirty = true; sound(440, 50) else error_message(reason) end
             else message("先同步手机步数再出发") end
         end
+    elseif page == "walk_confirm" then
+        if selection == 2 then settle_walk() else set_page("walk") end
     elseif page == "bag" then
         set_page("home")
     else set_page("home") end
@@ -268,15 +290,32 @@ end
 local function next_choice()
     if page == "home" then home_selection = home_selection % 4 + 1
     elseif page == "focus" then selection = selection % #focus_labels(game.snapshot()) + 1
-    elseif page == "walk" or page == "focus_confirm" then selection = selection % 2 + 1
+    elseif page == "walk" then selection = selection % #walk_labels(game.snapshot()) + 1
+    elseif page == "focus_confirm" or page == "walk_confirm" then selection = selection % 2 + 1
     elseif page == "bag" then selection = selection % 6 + 1 end
     draw()
 end
 function on_start()
+    page, home_selection, selection = "home", 1, 1
+    uptime, draw_elapsed, click_at, tick_count = 0, 0, nil, 0
+    toast, toast_until, animation_pose, animation_until = "", 0, 1, 0
+    dirty, last_save, save_error, speech_id = false, 0, nil, nil
+    step_sample, step_base, step_offset, step_day = nil, nil, 0, nil
+    step_status, last_result, step_restore_pending = "waiting", nil, false
     local saved = nil
     if config.storage_enabled ~= false and type(storage) == "table" and type(storage.load) == "function" then saved = storage.load() end
     game = create_game({saved = saved})
     local state = game.snapshot()
+    local function bounded_integer(value)
+        return type(value) == "number" and value == value and value >= 0 and value <= 200000 and value % 1 == 0
+    end
+    if type(saved) == "table" and saved.v == 1 and saved.status == "active" and
+        state.status == "paused" and state.source == "sensor" and
+        bounded_integer(saved.step_base) and bounded_integer(saved.step_offset) and
+        saved.step_offset <= state.step_count and valid_step_day(saved.step_day) then
+        step_base, step_offset, step_day = saved.step_base, saved.step_offset, saved.step_day
+        step_restore_pending = true
+    end
     if state.status == "finished" then
         local ok, result = game.claim_walk()
         if ok then last_result, page = result, "summary" end
@@ -292,6 +331,7 @@ function on_tick(dt_ms)
     local before = game.snapshot()
     local event = game.update(dt)
     if before.status == "active" or before.focus_status == "active" then dirty = true end
+    if event and event.kind == "satiety_changed" then dirty = true end
     if event and event.kind == "focus_finished" then
         local ok, result = game.claim_focus()
         if ok then
@@ -303,12 +343,17 @@ function on_tick(dt_ms)
         end
     end
     -- A carried device may leave Wi-Fi. Preserve its measured-step baseline;
-    -- only a deliberate pause excludes movement, and fresh sync gates settlement.
+    -- offline settlement requires explicit acknowledgement of missing samples.
     if click_at and uptime - click_at >= 320 then click_at = nil; next_choice() end
     if dirty and uptime - last_save >= 10000 then
         last_save = uptime
         if config.storage_enabled ~= false and type(storage) == "table" and type(storage.save) == "function" then
-            local ok, reason = storage.save(game.export(), 2592000)
+            local data = game.export()
+            if step_base ~= nil and step_day ~= nil then
+                data.step_base, data.step_offset, data.step_day = step_base, step_offset, step_day
+                if step_restore_pending then data.status = "active" end
+            end
+            local ok, reason = storage.save(data, 2592000)
             if ok then dirty, save_error = false, nil else save_error = reason or "unavailable" end
         elseif config.storage_enabled ~= false then save_error = "unavailable" end
     end
@@ -322,15 +367,22 @@ function on_tts_result(id, result)
     if id == speech_id then speech_id = nil end
 end
 function on_step_sample(total, day)
-    if type(total) ~= "number" or total ~= total or total < 0 or total > 10000000 or total % 1 ~= 0 or
-        type(day) ~= "string" or not day:match("^%d%d%d%d%-%d%d%-%d%d$") then return false end
+    if type(total) ~= "number" or total ~= total or total < 0 or total > 200000 or total % 1 ~= 0 or
+        not valid_step_day(day) then return false end
     local previous = step_sample
     if previous and previous.day == day and total < previous.total then return false end
     if previous and day < previous.day then return false end
+    local state = game and game.snapshot() or nil
+    local restored_minimum = step_base and state and step_base + state.step_count - step_offset or 0
+    if step_restore_pending and (day < step_day or (day == step_day and total < restored_minimum)) then return false end
     local was_fresh = fresh_steps()
     step_sample, step_status = {total = total, day = day, at = uptime}, "ready"
     if not game then return true end
-    local state = game.snapshot()
+    if step_restore_pending then
+        game.resume_walk()
+        step_restore_pending, dirty = false, true
+    end
+    state = game.snapshot()
     if state.status == "active" and state.source == "sensor" then
         if step_base == nil then step_base, step_offset, step_day = total, state.step_count, day end
         if day ~= step_day then step_base, step_offset, step_day = 0, state.step_count, day end

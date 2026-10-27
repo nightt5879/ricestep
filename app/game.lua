@@ -66,7 +66,8 @@ function create_game(options)
         end
         state.focus_claimed = math.min(state.focus_claimed, state.focus_id)
         if state.focus_id == 0 then state.focus_status, state.focus_ms = "idle", 0 end
-        if state.focus_status ~= "idle" and state.focus_claimed == state.focus_id then state.focus_status = "claimed" end
+        if state.focus_status ~= "idle" and state.focus_status ~= "cancelled" and
+            state.focus_claimed == state.focus_id then state.focus_status = "claimed" end
         if state.focus_status == "finished" and state.focus_ms < focus_duration then state.focus_status = "paused" end
     end
 
@@ -153,9 +154,11 @@ function create_game(options)
     function game.update(dt_ms)
         -- Count observed runtime only, never a large suspended/offline interval.
         local dt = integer(dt_ms, 0, 0, 5000)
+        local changed_satiety = false
         state.decay_ms = state.decay_ms + dt
         if state.decay_ms >= 300000 then
             state.decay_ms = state.decay_ms - 300000
+            changed_satiety = state.satiety > 20
             state.satiety = math.max(20, state.satiety - 1)
         end
         if state.status == "active" then
@@ -168,6 +171,7 @@ function create_game(options)
                 return {kind = "focus_finished"}
             end
         end
+        if changed_satiety then return {kind = "satiety_changed"} end
     end
 
     function game.set_steps(session_total)

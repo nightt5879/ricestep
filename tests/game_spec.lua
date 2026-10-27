@@ -136,6 +136,10 @@ function on_start()
     assert(focus_saved.cancel_focus())
     eq(focus_saved.claim_focus(), false, "cancelled focus not rewarded")
     eq(focus_saved.snapshot().rice, 4, "cancelling leaves rice unchanged")
+    local cancelled = create_game({focus_duration_ms = 10000, saved = focus_saved.export()})
+    eq(cancelled.snapshot().focus_status, "cancelled", "cancelled focus stays cancelled after reload")
+    eq(cancelled.claim_focus(), false, "restoring cancellation never rewards focus")
+    eq(cancelled.snapshot().rice, 4, "restoring cancellation leaves rice unchanged")
 
     local exported = recovered.export()
     local field_count = 0
