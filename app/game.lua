@@ -22,6 +22,7 @@ function create_game(options)
         status = "idle", source = "none", elapsed_ms = 0, step_count = 0,
         pending_item = 0, timer_carry = 0, step_carry = 0, decay_ms = 0,
         focus_status = "idle", focus_ms = 0, focus_id = 0, focus_claimed = 0, focus_count = 0,
+        cook_count = 0, perfect_count = 0,
     }
     local bounds = {
         rice = {0, MAX_RICE}, satiety = {20, 100}, mood = {0, 100},
@@ -34,6 +35,7 @@ function create_game(options)
         decay_ms = {0, 299999},
         focus_ms = {0, focus_duration}, focus_id = {0, 1000000000},
         focus_claimed = {0, 1000000000}, focus_count = {0, 1000000},
+        cook_count = {0, 1000000}, perfect_count = {0, 1000000},
     }
     local saved = options.saved
     if type(saved) == "table" and saved.v == 1 then
@@ -72,6 +74,12 @@ function create_game(options)
     end
 
     local game = {}
+    -- A cooking round is deliberately transient: reloading never awards it.
+    local cooking_status, cooking_ms, cooking_quality = "idle", 0, "none"
+    local function cooking_position()
+        local phase = cooking_ms % 4000
+        return math.floor((phase <= 2000 and phase or 4000 - phase) / 20)
+    end
     local function copy_state()
         local data = {}
         for key, value in pairs(state) do data[key] = value end
@@ -90,6 +98,17 @@ function create_game(options)
         local flag = 2 ^ (index - 1)
         return math.floor(state.collection / flag) % 2 == 1
     end
+    local function discover(index)
+        state.last_item, state.last_new = index, index > 0 and not has_item(index)
+        if index > 0 then
+            if state.last_new then state.collection = state.collection + 2 ^ (index - 1) end
+            state.bond = math.min(9999, state.bond + (state.last_new and 5 or 1))
+            state.mood = math.min(100, state.mood + 5)
+        end
+    end
+    local function random_item()
+        return integer(random(1, 6), 1, 1, 6)
+    end
 
     function game.snapshot()
         local data = copy_state()
@@ -98,6 +117,9 @@ function create_game(options)
         data.timer_rice_ms, data.steps_per_rice = timer_unit, step_unit
         data.focus_duration_ms = focus_duration
         data.focus_remaining_ms = math.max(0, focus_duration - state.focus_ms)
+        data.cooking_status, data.cooking_quality = cooking_status, cooking_quality
+        data.cooking_elapsed_ms, data.cooking_remaining_ms = cooking_ms, 10000 - cooking_ms
+        data.cooking_position = cooking_position()
         data.collection_count = 0
         for index = 1, 6 do
             if has_item(index) then data.collection_count = data.collection_count + 1 end
@@ -106,7 +128,7 @@ function create_game(options)
     end
 
     function game.export()
-        -- 27 scalar fields. Caller supplies TTL and respects storage's write rate.
+        -- 29 scalar fields. Caller supplies TTL and respects storage's write rate.
         return copy_state()
     end
 
@@ -126,6 +148,7 @@ function create_game(options)
     end
 
     function game.start_walk(source)
+        if cooking_status == "active" or cooking_status == "finished" then return false, "cooking_in_progress" end
         if source ~= "timer" and source ~= "sensor" then return false, "invalid_source" end
         if state.focus_status == "active" or state.focus_status == "paused" or state.focus_status == "finished" then
             return false, "focus_in_progress"
@@ -146,29 +169,39 @@ function create_game(options)
     end
 
     function game.resume_walk()
+        if cooking_status == "active" or cooking_status == "finished" then return false, "cooking_in_progress" end
         if state.status ~= "paused" then return false, "not_paused" end
         state.status = "active"
         return true, {kind = "walk_resumed"}
     end
 
-    function game.update(dt_ms)
-        -- Count observed runtime only, never a large suspended/offline interval.
+    function game.update(dt_ms, observed_ms)
+        -- Animation timing and observed elapsed time can differ on busy hardware.
+        -- The caller rejects clock jumps; the rules also bound each accepted delta.
         local dt = integer(dt_ms, 0, 0, 5000)
+        local observed = integer(observed_ms, dt, 0, 5000)
         local changed_satiety = false
-        state.decay_ms = state.decay_ms + dt
+        state.decay_ms = state.decay_ms + observed
         if state.decay_ms >= 300000 then
             state.decay_ms = state.decay_ms - 300000
             changed_satiety = state.satiety > 20
             state.satiety = math.max(20, state.satiety - 1)
         end
         if state.status == "active" then
-            state.elapsed_ms = math.min(MAX_WALK_MS, state.elapsed_ms + dt)
+            state.elapsed_ms = math.min(MAX_WALK_MS, state.elapsed_ms + observed)
         end
         if state.focus_status == "active" then
-            state.focus_ms = math.min(focus_duration, state.focus_ms + dt)
+            state.focus_ms = math.min(focus_duration, state.focus_ms + observed)
             if state.focus_ms >= focus_duration then
                 state.focus_status = "finished"
                 return {kind = "focus_finished"}
+            end
+        end
+        if cooking_status == "active" then
+            cooking_ms = math.min(10000, cooking_ms + dt)
+            if cooking_ms >= 10000 then
+                cooking_status, cooking_quality = "finished", "burnt"
+                return {kind = "cooking_finished", quality = cooking_quality}
             end
         end
         if changed_satiety then return {kind = "satiety_changed"} end
@@ -196,7 +229,7 @@ function create_game(options)
         if state.status ~= "active" and state.status ~= "paused" then return false, "no_walk" end
         state.status = "finished"
         if pending_reward() > 0 then
-            state.pending_item = integer(random(1, 6), 1, 1, 6)
+            state.pending_item = random_item()
         end
         return true, {kind = "walk_finished", pending_rice = pending_reward(), source = state.source}
     end
@@ -218,14 +251,7 @@ function create_game(options)
         state.total_steps = math.min(1000000000, state.total_steps + state.step_count)
         state.walks = math.min(1000000, state.walks + 1)
         state.claimed_id, state.status = state.session_id, "claimed"
-        state.last_item, state.last_new = 0, false
-        if reward > 0 and state.pending_item > 0 then
-            state.last_item = state.pending_item
-            state.last_new = not has_item(state.pending_item)
-            if state.last_new then state.collection = state.collection + 2 ^ (state.pending_item - 1) end
-            state.bond = math.min(9999, state.bond + (state.last_new and 5 or 1))
-            state.mood = math.min(100, state.mood + 5)
-        end
+        discover(reward > 0 and state.pending_item or 0)
         state.pending_item = 0
         return true, {
             kind = "walk_claimed", rice_added = added, rice_earned = reward,
@@ -235,6 +261,7 @@ function create_game(options)
     end
 
     function game.start_focus()
+        if cooking_status == "active" or cooking_status == "finished" then return false, "cooking_in_progress" end
         if state.status == "active" or state.status == "paused" or state.status == "finished" then
             return false, "walk_in_progress"
         end
@@ -252,6 +279,7 @@ function create_game(options)
     end
 
     function game.resume_focus()
+        if cooking_status == "active" or cooking_status == "finished" then return false, "cooking_in_progress" end
         if state.focus_status ~= "paused" then return false, "not_paused" end
         state.focus_status = "active"
         return true, {kind = "focus_resumed"}
@@ -270,7 +298,43 @@ function create_game(options)
         local added = state.rice < MAX_RICE and 1 or 0
         state.rice = state.rice + added
         state.bond, state.mood = math.min(9999, state.bond + 3), math.min(100, state.mood + 4)
-        return true, {kind = "focus_claimed", rice_added = added, source = "focus"}
+        discover(random_item())
+        return true, {kind = "focus_claimed", rice_added = added, source = "focus", item = state.last_item, is_new = state.last_new}
+    end
+
+    function game.start_cooking()
+        if cooking_status == "active" then return false, "cooking_in_progress" end
+        if cooking_status == "finished" then return false, "reward_pending" end
+        if state.focus_status == "active" then return false, "focus_in_progress" end
+        if state.focus_status == "finished" then return false, "reward_pending" end
+        if state.status == "active" or state.status == "paused" or state.status == "finished" then return false, "walk_in_progress" end
+        cooking_status, cooking_ms, cooking_quality = "active", 0, "none"
+        return true, {kind = "cooking_started"}
+    end
+
+    function game.stop_cooking()
+        if cooking_status == "finished" then return true, {kind = "cooking_finished", quality = cooking_quality} end
+        if cooking_status ~= "active" then return false, "not_active" end
+        local position = cooking_position()
+        if position >= 44 and position <= 56 then cooking_quality = "perfect"
+        elseif position >= 28 and position <= 72 then cooking_quality = "good"
+        elseif position < 28 then cooking_quality = "raw"
+        else cooking_quality = "burnt" end
+        cooking_status = "finished"
+        return true, {kind = "cooking_finished", quality = cooking_quality}
+    end
+
+    function game.claim_cooking()
+        if cooking_status ~= "finished" then return false, "not_finished" end
+        cooking_status = "claimed"
+        state.cook_count = math.min(1000000, state.cook_count + 1)
+        local earned = cooking_quality == "perfect" and 2 or (cooking_quality == "good" and 1 or 0)
+        local added = math.min(earned, MAX_RICE - state.rice)
+        state.rice = state.rice + added
+        if cooking_quality == "perfect" then state.perfect_count = math.min(1000000, state.perfect_count + 1) end
+        discover(cooking_quality == "perfect" and random_item() or 0)
+        return true, {kind = "cooking_claimed", quality = cooking_quality,
+            rice_added = added, rice_earned = earned, item = state.last_item, is_new = state.last_new}
     end
 
     return game
