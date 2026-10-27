@@ -1,0 +1,11 @@
+.tools/
+.cache/
+dist/
+work/
+*.log
+.env
+.env.*
+!.env.example
+device-app*.lua
+Thumbs.db
+.DS_Store

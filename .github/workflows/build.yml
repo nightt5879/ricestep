@@ -1,0 +1,28 @@
+name: Build miniapp
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install pinned official SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/setup.ps1
+      - name: Validate and build Lua miniapp
+        run: ./scripts/build.ps1
+      - name: Upload application and rendered preview
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ricestep-miniapp
+          path: dist/
+          if-no-files-found: error

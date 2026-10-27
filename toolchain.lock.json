@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "platform": "windows-x64",
+  "sdk": {
+    "repository": "LISTENAI/LingClaw-SDK",
+    "tag": "v0.1.0",
+    "commit": "eff009e242cd748f1ba7a9cd3001b72b1de38298",
+    "asset": "LingClaw-SDK-0.1.0-windows-x64.zip",
+    "sha256": "1c6ec88da669d05e1129bf13996677e88dd195726ba8bb2614aeedadebf047e8",
+    "directory": "LingClaw-SDK-0.1.0-windows-x64",
+    "minimumAppApi": 2
+  }
+}
