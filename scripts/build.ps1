@@ -1,13 +1,27 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param()
+param([string]$VoiceBaseUrl)
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $null = New-Item -ItemType Directory -Path (Join-Path $RepoRoot 'dist') -Force
 $source = Join-Path $RepoRoot "dist/build-$([Guid]::NewGuid().ToString('N')).lua"
-$prefix = "-- RiceStep bundle; edit app/*.lua instead.`nRICESTEP_CONFIG={tts_enabled=true}`n"
+$voiceConfig = Join-Path $RepoRoot '.voice-config.json'
+if (-not $PSBoundParameters.ContainsKey('VoiceBaseUrl') -and (Test-Path -LiteralPath $voiceConfig)) {
+    $VoiceBaseUrl = (Get-Content -LiteralPath $voiceConfig -Raw | ConvertFrom-Json).base_url
+}
+$voiceSetting = ''
+if ($VoiceBaseUrl) {
+    $VoiceBaseUrl = $VoiceBaseUrl.TrimEnd('/')
+    $uri = $null
+    if ($VoiceBaseUrl.Length -gt 400 -or $VoiceBaseUrl -notmatch '^https?://[A-Za-z0-9:./_-]+$' -or
+        -not [Uri]::TryCreate($VoiceBaseUrl, [UriKind]::Absolute, [ref]$uri) -or -not $uri.Host) {
+        throw 'VoiceBaseUrl must be an HTTP(S) base URL without credentials, query or fragment.'
+    }
+    $voiceSetting = ',voice_base_url="' + $VoiceBaseUrl + '"'
+}
+$prefix = "-- RiceStep bundle; edit app/*.lua instead.`nRICESTEP_CONFIG={tts_enabled=true$voiceSetting}`n"
 $sourceText = $prefix
-foreach ($module in @('game.lua', 'character.lua', 'main.lua')) {
+foreach ($module in @('game.lua', 'character.lua', 'voice.lua', 'main.lua')) {
     $sourceText += "`n-- Module: $module`n" + [IO.File]::ReadAllText((Join-Path $RepoRoot "app/$module")) + "`n"
 }
 $sourceSize = [Text.Encoding]::UTF8.GetByteCount($sourceText)

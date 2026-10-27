@@ -10,6 +10,15 @@
     "directory": "LingClaw-SDK-0.1.0-windows-x64",
     "minimumAppApi": 2
   },
+  "voice": {
+    "generator": "edge-tts",
+    "version": "7.3.1",
+    "repository": "rany2/edge-tts",
+    "validatedPython": "3.13.13",
+    "environment": ".tools/voice-venv",
+    "audioManifest": "assets/audio/v1/manifest.json",
+    "note": "Generator version is pinned by scripts/generate-voice.ps1; generated MP3 SHA-256 hashes are in audioManifest."
+  },
   "adb": {
     "version": "37.0.1",
     "asset": "platform-tools_r37.0.1-win.zip",

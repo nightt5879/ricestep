@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "provider": "Microsoft Edge Read Aloud",
+  "generator": {
+    "package": "edge-tts",
+    "version": "7.3.1"
+  },
+  "voice": "zh-CN-XiaoyiNeural",
+  "rate": "-12%",
+  "pitch": "+4Hz",
+  "volume": "+0%",
+  "clips": [
+    {
+      "id": "feed",
+      "file": "feed.mp3",
+      "text": "啊呜，好吃。再一口，就一口。",
+      "duration_ms": 4632,
+      "bytes": 27792,
+      "sha256": "b31c044dbbcd7c6b81ce93e5370336fec8dcabce468d748add05bd4a0834666c",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "full",
+      "file": "full.mp3",
+      "text": "唔，装不下了。先存着，饭不会跑吧？",
+      "duration_ms": 5184,
+      "bytes": 31104,
+      "sha256": "00c0ea6e136f15886dde67310be56be4d3ec7fd1a4f4acf04b39ebf253454236",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "no_rice",
+      "file": "no_rice.mp3",
+      "text": "咦，饭呢？我的碗，怎么空空的。",
+      "duration_ms": 4752,
+      "bytes": 28512,
+      "sha256": "f3a981d84fbff160337b2ef68ddbc614bcb6208c9a20e1fc310383263bd1ff39",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "focus_start",
+      "file": "focus_start.mp3",
+      "text": "你认真忙。我认真，等开饭。",
+      "duration_ms": 4248,
+      "bytes": 25488,
+      "sha256": "47f333aba97274e5b56a9114c38f53ac2c4534e6eb00875c2777496377334b12",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "focus_done",
+      "file": "focus_done.mp3",
+      "text": "诶，忙完啦？我把碗，摆好啦。",
+      "duration_ms": 4416,
+      "bytes": 26496,
+      "sha256": "4efcd309bd303ea71766a34fd3f0092d9183a29e55199c5095b4e324b97727f5",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "perfect",
+      "file": "perfect.mp3",
+      "text": "诶嘿，香的！这碗，先归我。",
+      "duration_ms": 4536,
+      "bytes": 27216,
+      "sha256": "6da1a105c51b562b5e57290f2bfb613cca0f86595696fd2f685bcde14455df5d",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "good",
+      "file": "good.mp3",
+      "text": "软乎乎的。你一口，我两口。",
+      "duration_ms": 4248,
+      "bytes": 25488,
+      "sha256": "7e3ceadcb3c2c6b5a9cebfe470034b379b1e259d469ef31948767956b639b9fd",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "raw",
+      "file": "raw.mp3",
+      "text": "唔，有点硬。米饭还没睡醒。",
+      "duration_ms": 4128,
+      "bytes": 24768,
+      "sha256": "afde66d1a7fceb5c95456f6bf90c354cfddd46fe60aecaec6b9392a1b74a12db",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "burnt",
+      "file": "burnt.mp3",
+      "text": "呃，饭好像，晒黑了。是锅巴！",
+      "duration_ms": 4944,
+      "bytes": 29664,
+      "sha256": "4f511528bf5e501d06cfbcf81eac18a2c3229bdf783b0c483f98879825fa31c4",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "remember_burnt",
+      "file": "remember_burnt.mp3",
+      "text": "这次我盯着锅。嗯，盯着。",
+      "duration_ms": 4080,
+      "bytes": 24480,
+      "sha256": "fd7e8ff3127a79a4a56aaf36b7f6441bc3a97dae32e8d26346f2730d751129b9",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "remember_perfect",
+      "file": "remember_perfect.mp3",
+      "text": "上次的饭，梦里都香。还想吃。",
+      "duration_ms": 4704,
+      "bytes": 28224,
+      "sha256": "9cd51d69e169768ef1081084074696c75c3c8be13ff3206ac9d7468e03b2e49e",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "remember_good",
+      "file": "remember_good.mp3",
+      "text": "还要上次那个饭。碗，我拿好了。",
+      "duration_ms": 4344,
+      "bytes": 26064,
+      "sha256": "06e392c9e3e9e295d7f5df80e9c46c1b6ab9fced6719c6f0fb9d7fcf1451d5bc",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "remember_raw",
+      "file": "remember_raw.mp3",
+      "text": "上次米饭没睡醒。这次让它多睡会儿。",
+      "duration_ms": 4872,
+      "bytes": 29232,
+      "sha256": "2bd7c792ca9ec4ff6238966408bace37856021d1d858e74fbb119fbe24c3da03",
+      "sample_rate": 24000,
+      "channels": 1
+    },
+    {
+      "id": "hello",
+      "file": "hello.mp3",
+      "text": "你来啦。我在，等饭。",
+      "duration_ms": 3480,
+      "bytes": 20880,
+      "sha256": "eb56451323165c7b964d44d436453363323bceef5543750f3a4e1f1e1a6d45a7",
+      "sample_rate": 24000,
+      "channels": 1
+    }
+  ]
+}

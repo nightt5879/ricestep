@@ -3,14 +3,25 @@ local config = type(RICESTEP_CONFIG) == "table" and RICESTEP_CONFIG or {}
 local game, page, home_selection, selection = nil, "home", 1, 1
 local uptime, draw_elapsed, click_at, tick_count = 0, 0, nil, 0
 local toast, toast_until, animation_pose, animation_until = "", 0, 1, 0
-local dirty, last_save, save_error, speech_id = false, 0, nil, nil
+local dirty, last_save, save_error, voice = false, 0, nil, nil
 local cook_armed_at, input_after, cook_result, last_clock = 0, 0, nil, nil
+local last_interaction, greeted = 0, false
 local BG, INK, MUTED, BLUE = 0xFFF5E5, 0x233D61, 0x6F8395, 0x399AB2
 local CARD, LIGHT, GOLD, WHITE = 0xFFFBF3, 0xDCEFF0, 0xD7A749, 0xFFFFFF
 local item_names = {"荷叶帽", "小贝壳", "鹅卵石", "晴天花", "云朵邮票", "米粒勋章"}
 local item_notes = {"认真生活，也要记得休息", "把海边的声音装进口袋", "小小的努力，也会发光", "今天又收集到一点晴天", "寄给下一次努力的自己", "你负责努力，我负责吃饭"}
 local dish_names = {perfect = "完美白米饭", good = "香香米饭", raw = "夹生饭", burnt = "锅巴饭"}
-local dish_lines = {perfect = "这碗饭，我认可了！", good = "香香的，我先开动啦", raw = "还差一点点，再焖一会", burnt = "锅巴也很香，下次早点"}
+local dish_lines = {perfect = "诶嘿，香的！这碗归我", good = "你一口，我两口", raw = "米饭还没睡醒", burnt = "呃……饭好像晒黑了"}
+local meal_notes = {perfect = "上次的饭，梦里都香", good = "还要上次那个，碗拿好了", raw = "上次没睡醒，这次多焖会", burnt = "上次饭晒黑了，这回盯紧"}
+local voice_lines = {
+    feed = "啊呜，好吃。再一口，就一口。", full = "唔，装不下了。先存着，饭不会跑吧？",
+    no_rice = "咦，饭呢？我的碗，怎么空空的。", focus_start = "你认真忙。我认真，等开饭。",
+    focus_done = "诶，忙完啦？我把碗，摆好啦。", perfect = "诶嘿，香的！这碗，先归我。",
+    good = "软乎乎的。你一口，我两口。", raw = "唔，有点硬。米饭还没睡醒。",
+    burnt = "呃，饭好像，晒黑了。是锅巴！", remember_burnt = "这次我盯着锅。嗯，盯着。",
+    remember_perfect = "上次的饭，梦里都香。还想吃。", remember_good = "还要上次那个饭。碗，我拿好了。",
+    remember_raw = "上次米饭没睡醒。这次让它多睡会儿。", hello = "你来啦。我在，等饭。"
+}
 
 local function width_of(text)
     local width = 0
@@ -22,14 +33,12 @@ local function centered(text, y, color)
 end
 local function message(text, duration) toast, toast_until = text, uptime + (duration or 3000) end
 local function sound(hz, duration)
-    if config.sound_enabled ~= false and type(buzzer) == "table" and type(buzzer.play) == "function" then buzzer.play(hz, duration) end
+    if config.sound_enabled ~= false and not (voice and voice.busy()) and type(buzzer) == "table" and type(buzzer.play) == "function" then buzzer.play(hz, duration) end
 end
-local function say(text)
-    if config.tts_enabled == true and tick_count > 1 and not speech_id and type(tts) == "table" and type(tts.speak) == "function" then
-        speech_id = tts.speak(text)
-    end
+local function say(key, priority)
+    if voice and voice_lines[key] then voice.say(key, voice_lines[key], priority or 1) end
 end
-local function animate(pose) animation_pose, animation_until = pose, uptime + 3000 end
+local function animate(pose) animation_pose, animation_until = pose, uptime + 5200 end
 local function headline(default)
     if uptime < toast_until then return toast end
     if save_error then return "进度暂未保存，稍后重试" end
@@ -52,6 +61,10 @@ local function actions(labels, selected)
 end
 local function character(pose, small)
     local chosen = uptime < animation_until and animation_pose or pose
+    if chosen == 2 and uptime < animation_until then
+        local remaining = animation_until - uptime
+        if remaining > 4500 then chosen = 5 elseif remaining < 1000 then chosen = 4 end
+    end
     if small then draw_character(chosen, 88, 58, 2)
     else
         local bob = chosen == 1 and math.floor(math.sin(uptime / 450) * 1.5) or 0
@@ -104,7 +117,7 @@ local function draw_item(index, owned)
     end
 end
 local function cooking_scene(state)
-    draw_character(1, 28, 59, 2)
+    draw_character(state.cooking_status == "active" and 5 or (state.last_meal == "burnt" and 6 or 5), 28, 59, 2)
     screen.rect(126, 99, 68, 35, BLUE)
     screen.rect(120, 95, 80, 8, INK)
     screen.rect(137, 87, 47, 8, LIGHT)
@@ -125,9 +138,9 @@ local function draw()
     if not game then return end
     local state = game.snapshot()
     if page == "home" then
-        header("肥鱼陪工记", state)
+        header("肥鱼饭搭子", state)
         screen.rect(12, 36, 216, 22, CARD)
-        local hints = {"你负责努力，我负责吃饭", "一起专心一小会儿", "小锅开火，等一碗好饭", "每份努力，都有小收获"}
+        local hints = {"我在等饭，没在发呆", "你认真忙，我认真等饭", meal_notes[state.last_meal] or "小锅开火，等一碗好饭", "今天又攒到一点小开心"}
         local hint = hints[home_selection]
         if state.focus_status == "active" then hint = "我陪着你  " .. time_label(state.focus_remaining_ms)
         elseif state.focus_status == "paused" then hint = "歇一小会儿，再继续"
@@ -135,7 +148,9 @@ local function draw()
         elseif home_selection == 1 and math.floor(uptime / 12000) % 2 == 1 then hint = "抬抬头，伸个懒腰吧" end
         centered(headline(hint), 39, INK)
         shelf()
-        character(1, false)
+        local pose = home_selection == 3 and (state.last_meal == "burnt" and 6 or 5) or 1
+        if state.focus_status == "active" or state.satiety >= 90 or uptime - last_interaction > 15000 then pose = 4 end
+        character(pose, false)
         actions({"喂饭", "专注", "煮饭", "收藏"}, home_selection)
     elseif page == "focus" then
         header("肥鱼陪你专注", state)
@@ -144,7 +159,7 @@ local function draw()
         elseif state.focus_status == "paused" then hint = "歇一小会儿，再继续"
         elseif state.focus_status == "claimed" then hint = "辛苦啦！一起开饭吧" end
         centered(headline(hint), 40, INK)
-        character(1, true)
+        character(state.focus_status == "active" and 4 or 1, true)
         local inactive = state.focus_status == "idle" or state.focus_status == "cancelled"
         centered(time_label(inactive and state.focus_duration_ms or state.focus_remaining_ms), 146, INK)
         screen.rect(20, 172, 200, 5, LIGHT)
@@ -171,7 +186,7 @@ local function draw()
     elseif page == "cook_result" then
         header(dish_names[cook_result.quality] or "这次的米饭", state)
         centered(dish_lines[cook_result.quality] or "下次也一起做饭吧", 40, INK)
-        character(cook_result.rice_added > 0 and 2 or 1, true)
+        character(cook_result.rice_added > 0 and 2 or 6, true)
         centered(cook_result.rice_added > 0 and ("米饭 +" .. cook_result.rice_added .. " 碗") or "再试一次，存粮不会减少", 146, INK)
         centered(cook_result.item > 0 and ((cook_result.is_new and "新发现：" or "又遇见：") .. item_names[cook_result.item]) or "轻松做饭，不着急", 166, MUTED)
         actions({"再来", "回家"}, selection)
@@ -200,8 +215,8 @@ local function finish_cooking()
     cook_result, dirty, input_after = result, true, uptime + 500
     animation_until = 0
     set_page("cook_result")
-    sound(result.rice_added > 0 and 659 or 330, 80)
-    say(dish_lines[result.quality])
+    animate(result.rice_added > 0 and 2 or 6)
+    say(result.quality, 2)
 end
 local function begin_cooking()
     local ok, reason = game.start_cooking()
@@ -216,10 +231,12 @@ local function choose()
     if page == "home" then
         if home_selection == 1 then
             local ok, reason = game.feed()
-            if ok then dirty = true; message("开饭啦！白米饭真好吃"); animate(2); sound(523, 70); say("开饭啦，白米饭真好吃！")
-            else error_message(reason) end
+            if ok then dirty = true; message("啊呜……再一口，就一口"); animate(2); say("feed")
+            else error_message(reason); animate(reason == "full" and 4 or 5); say(reason) end
         elseif home_selection == 2 then set_page("focus")
-        elseif home_selection == 3 then set_page("cook")
+        elseif home_selection == 3 then
+            set_page("cook")
+            if meal_notes[state.last_meal] then message(meal_notes[state.last_meal], 5000); say("remember_" .. state.last_meal) end
         else set_page("bag") end
     elseif page == "focus" then
         local choice = focus_labels(state)[selection]
@@ -230,7 +247,10 @@ local function choose()
             if choice == "暂停" then ok, reason = game.pause_focus()
             elseif choice == "继续" then ok, reason = game.resume_focus()
             else ok, reason = game.start_focus() end
-            if ok then dirty = true; selection = 1; sound(440, 50) else error_message(reason) end
+            if ok then
+                dirty = true; selection = 1
+                if choice == "开始" or choice == "再来" then say("focus_start") else sound(440, 50) end
+            else error_message(reason) end
         end
     elseif page == "focus_confirm" then
         if selection == 2 then game.cancel_focus(); dirty = true; message("休息一下，也很好") end
@@ -259,7 +279,9 @@ function on_start()
     page, home_selection, selection = "home", 1, 1
     uptime, draw_elapsed, click_at, tick_count = 0, 0, nil, 0
     toast, toast_until, animation_pose, animation_until = "", 0, 1, 0
-    dirty, last_save, save_error, speech_id = false, 0, nil, nil
+    dirty, last_save, save_error = false, 0, nil
+    voice = create_voice({enabled = config.tts_enabled == true, base_url = config.voice_base_url})
+    last_interaction, greeted = 0, false
     cook_armed_at, input_after, cook_result, last_clock = 0, 0, nil, clock_seconds()
     local saved = nil
     if config.storage_enabled ~= false and type(storage) == "table" and type(storage.load) == "function" then saved = storage.load() end
@@ -278,6 +300,11 @@ function on_tick(dt_ms)
     tick_count = tick_count + 1
     local dt = type(dt_ms) == "number" and dt_ms == dt_ms and math.floor(math.max(0, math.min(5000, dt_ms))) or 0
     uptime, draw_elapsed = uptime + dt, draw_elapsed + dt
+    voice.update(dt)
+    if not greeted and uptime >= 2500 then
+        greeted = true
+        if last_interaction == 0 then say("hello", 0) end
+    end
     local observed, now = dt, clock_seconds()
     if now then
         local difference = last_clock and now - last_clock or 0
@@ -292,7 +319,7 @@ function on_tick(dt_ms)
         if ok then
             dirty = true
             message(result.is_new and ("新发现：" .. item_names[result.item]) or "专注完成！一起开饭吧", 5000)
-            animate(3); sound(659, 100); say("辛苦啦，一起开饭吧！"); set_page("focus")
+            animate(3); say("focus_done", 2); set_page("focus")
         end
     elseif event and event.kind == "cooking_finished" then finish_cooking() end
     if click_at and uptime - click_at >= 320 then click_at = nil; next_choice() end
@@ -308,6 +335,7 @@ function on_tick(dt_ms)
 end
 function on_button_click(button_id)
     if button_id ~= "function" or not game or uptime < input_after then return end
+    last_interaction = uptime
     if page == "cook" and game.snapshot().cooking_status == "active" then
         click_at = nil
         if uptime >= cook_armed_at then
@@ -317,8 +345,9 @@ function on_button_click(button_id)
     end
     if click_at and uptime - click_at < 320 then click_at = nil; choose() else click_at = uptime end
 end
-function on_tts_result(id, result) if id == speech_id then speech_id = nil end end
+function on_tts_result(id, result) if voice then voice.on_tts_result(id, result) end end
 function ricestep_debug()
     return {page = page, selection = selection, home_selection = home_selection,
-        state = game and game.snapshot() or nil, save_error = save_error}
+        state = game and game.snapshot() or nil, save_error = save_error, voice = voice and voice.debug() or nil,
+        line = uptime < toast_until and toast or nil, pose = animation_pose}
 end

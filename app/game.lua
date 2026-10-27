@@ -22,7 +22,7 @@ function create_game(options)
         status = "idle", source = "none", elapsed_ms = 0, step_count = 0,
         pending_item = 0, timer_carry = 0, step_carry = 0, decay_ms = 0,
         focus_status = "idle", focus_ms = 0, focus_id = 0, focus_claimed = 0, focus_count = 0,
-        cook_count = 0, perfect_count = 0,
+        cook_count = 0, perfect_count = 0, last_meal = "",
     }
     local bounds = {
         rice = {0, MAX_RICE}, satiety = {20, 100}, mood = {0, 100},
@@ -43,6 +43,10 @@ function create_game(options)
             state[key] = integer(saved[key], state[key], range[1], range[2])
         end
         state.last_new = saved.last_new == true
+        if saved.last_meal == "perfect" or saved.last_meal == "good" or
+            saved.last_meal == "raw" or saved.last_meal == "burnt" then
+            state.last_meal = saved.last_meal
+        end
         if saved.source == "timer" or saved.source == "sensor" then
             state.source = saved.source
         end
@@ -128,7 +132,7 @@ function create_game(options)
     end
 
     function game.export()
-        -- 29 scalar fields. Caller supplies TTL and respects storage's write rate.
+        -- 30 scalar fields. Caller supplies TTL and respects storage's write rate.
         return copy_state()
     end
 
@@ -327,6 +331,8 @@ function create_game(options)
     function game.claim_cooking()
         if cooking_status ~= "finished" then return false, "not_finished" end
         cooking_status = "claimed"
+        -- Remember only a settled meal; an interrupted round leaves the last one intact.
+        state.last_meal = cooking_quality
         state.cook_count = math.min(1000000, state.cook_count + 1)
         local earned = cooking_quality == "perfect" and 2 or (cooking_quality == "good" and 1 or 0)
         local added = math.min(earned, MAX_RICE - state.rice)

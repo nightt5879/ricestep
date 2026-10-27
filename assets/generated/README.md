@@ -1,5 +1,7 @@
 # Whale girl sprite sheet v1
 
+Additional lazy, hungry and sheepish expressions are documented in [expressions-v2.md](expressions-v2.md). They are runtime poses 4–6; the original poses 1–3 below remain in use.
+
 Created 2026-10-27 with the built-in image_gen tool, using the user-provided character reference. No API key or fallback CLI was used.
 
 - File: `whale-girl-sheet-v1.png`

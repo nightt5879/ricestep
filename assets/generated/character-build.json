@@ -1,5 +1,14 @@
 {
-  "sourceSha256": "222c48716d852d339e8488365dc558612164c87baeb08f7804b4aff360be2390",
+  "sources": [
+    {
+      "file": "whale-girl-sheet-v1.png",
+      "sha256": "222c48716d852d339e8488365dc558612164c87baeb08f7804b4aff360be2390"
+    },
+    {
+      "file": "whale-girl-expressions-v2.png",
+      "sha256": "3d9ba5a8cae5b5c61b53dbdb4ba83c34b1c9b1db8674453c3cd72ce9a6f00cb5"
+    }
+  ],
   "high": [
     {
       "grid": [
@@ -21,6 +30,27 @@
         40
       ],
       "shapes": 230
+    },
+    {
+      "grid": [
+        32,
+        40
+      ],
+      "shapes": 187
+    },
+    {
+      "grid": [
+        32,
+        40
+      ],
+      "shapes": 192
+    },
+    {
+      "grid": [
+        32,
+        40
+      ],
+      "shapes": 198
     }
   ],
   "low": [
@@ -44,6 +74,27 @@
         24
       ],
       "shapes": 89
+    },
+    {
+      "grid": [
+        18,
+        26
+      ],
+      "shapes": 90
+    },
+    {
+      "grid": [
+        18,
+        26
+      ],
+      "shapes": 95
+    },
+    {
+      "grid": [
+        18,
+        26
+      ],
+      "shapes": 98
     }
   ]
 }

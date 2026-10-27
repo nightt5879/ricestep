@@ -1,16 +1,18 @@
 # RiceStep development
 
 - Use authenticated local `gh` and `git` for GitHub work; do not use GitHub connectors.
-- This is a LingClaw Lua miniapp. Use APIs documented in the pinned official SDK.
+- This is a LingClaw Lua miniapp. Prefer APIs documented in the pinned official SDK; clearly record bounded physical probes for API 5 features absent from the API 4 desktop SDK.
 - Keep tool versions and archive SHA-256 hashes in `toolchain.lock.json`.
 - Do not commit downloaded tools, build outputs, credentials, device serials, or private device data.
 - Run `pwsh -File scripts/build.ps1` after Lua or build changes; run `scripts/test.ps1` for logic and interaction changes. Check rendered previews when changing UI.
 - Use `pwsh -File scripts/dev.ps1` for real window/input checks; headless rendering does not prove GUI input or physical hardware support.
 - The device is confirmed as Arcs Mini3, firmware 3.1.0, Lua API 5, 256 shapes/frame. The old desktop simulator is API 4 with 128 rectangles, so it uses lower-detail art.
-- The user chose desktop companionship + a cooking mini-game (2026-10-27). Current menus are feeding, focus, cooking and collection. Do not pursue phone step sync until requested again; the build excludes step-sync.lua and ignores .local-config.json. No board motion-sensor API was found. Never present timers, key clicks or test samples as measured steps.
+- The user chose desktop companionship + a cooking mini-game (2026-10-27), now named 肥鱼饭搭子. Current menus are feeding, focus, cooking and collection. Do not pursue phone step sync until requested again; the build excludes step-sync.lua and ignores .local-config.json. No board motion-sensor API was found. Never present timers, key clicks or test samples as measured steps.
 - The user confirmed the character display/menu controls and, after the companion update, actual Mini3 cooking and rice rewards (2026-10-27). Menus retain single-click selection / double-click confirmation; active cooking uses one click to stop, with 350ms startup arming and 500ms result protection.
-- Focus rewards one rice + a collection discovery. Perfect cooking rewards two rice + discovery, good cooking one rice, other outcomes zero without inventory loss. Persisted progress has 29 scalar fields; keep storage within 32 fields and 1KiB. Cooking rounds are transient; focus reloads paused.
+- Focus rewards one rice + a collection discovery. Perfect cooking rewards two rice + discovery, good cooking one rice, other outcomes zero without inventory loss. Persisted progress has 30 scalar fields including last_meal; keep storage within 32 fields and 1KiB. last_meal changes only on cooking claim (including raw/burnt), survives restoration and ignores interrupted rounds. Cooking rounds are transient; focus reloads paused.
 - game.update(animation_dt, observed_dt) keeps cooking motion separate from elapsed focus time. When calibrated clock seconds are available, accept only 0..5 second deltas; reject backward/large jumps. The fallback is runtime dt, not fabricated wall time or steps.
-- Source art is encoded into compact character strings; regenerate with `npm run assets`. Device startup rejected the original large-table form.
+- Source art has six poses: idle, eating, discovery, sleepy, hungry, awkward. It is encoded into compact character strings; regenerate with `npm run assets`. Device startup rejected the original large-table form.
+- Build modules are game.lua, character.lua, voice.lua, main.lua. The optional ignored .voice-config.json base_url (or -VoiceBaseUrl) supplies the voice pack URL prefix. Do not commit actual LAN addresses or credentials.
+- Fourteen authored voice clips live in assets/audio/v1; voice.lua handles playback and device TTS fallback. The chosen character voice is XiaoyiNeural, rate -12%, pitch +4Hz: goofy, cute, greedy and a beat slow. The user approved the feed/burnt audition clips; do not expand this evidence into claiming every clip was auditioned. The voice server only serves manifest-listed MP3 over GET/HEAD, with Range support. Physical API 5 probes confirmed audio.play(string HTTP(S) URL) returns true and audio.get_state() moves loading -> playing -> idle; local filesystem paths are rejected.
 - Keep environment setup separate from device deployment. ADB upload immediately replaces the current miniapp.
 - Save verified, coherent changes in commits; do not claim a build or physical test that was not run.
