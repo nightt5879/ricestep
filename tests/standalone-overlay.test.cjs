@@ -1,0 +1,39 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const cp = require('node:child_process');
+const crypto = require('node:crypto');
+const { SDK_COMMIT, buildPatches, bundleFiles } = require('../scripts/prepare-standalone.cjs');
+const ROOT = path.resolve(__dirname, '..');
+const SDK = path.join(ROOT, '.cache/native-mini3-sdk');
+
+test('resident C payload preserves exact UTF-8 Lua and stays within source limit', () => {
+  const result = bundleFiles();
+  const arrayText = result.c.slice(result.c.indexOf('= {') + 3, result.c.lastIndexOf('}'));
+  const reconstructed = Buffer.from(arrayText.split(',').map(s => s.trim()).filter(Boolean).map(Number));
+  assert.equal(reconstructed.at(-1), 0);
+  assert.equal(reconstructed.length, result.bytes + 1);
+  assert.equal(reconstructed.subarray(0, -1).toString('utf8'), result.source);
+  assert.equal(crypto.createHash('sha256').update(reconstructed.subarray(0, -1)).digest('hex'), result.sha256);
+  assert.ok(result.bytes <= 65536);
+  assert.ok(result.source.includes('voice_base_url="builtin://ricestep",sound_enabled=false'));
+  assert.ok(!result.source.includes('192.168.'));
+  assert.ok(result.header.includes(`RICE_BUNDLE_SIZE ${result.bytes}u`));
+});
+
+test('pinned SDK anchors preserve stock behavior outside standalone guards', { skip: !fs.existsSync(path.join(SDK, '.git')) }, () => {
+  const read = name => cp.execFileSync('git', ['-C', SDK, 'show', `${SDK_COMMIT}:${name}`], {encoding:'utf8'});
+  const result = buildPatches(read);
+  assert.equal(Object.keys(result).length, 11);
+  assert.ok(result['apps/arcs-mini/miniapp/miniapp_runtime.c'].includes('&& !rice_storage_owns(vm->id)'));
+  assert.ok(result['apps/arcs-mini/miniapp/miniapp_runtime.c'].includes('rice_lua_audio_open(L)'));
+  assert.ok(result['apps/arcs-mini/miniapp/miniapp_storage.c'].includes('record->expires = now + ttl;'));
+  assert.ok(result['apps/arcs-mini/main.c'].includes('rice_standalone_start()'));
+  assert.ok(result['src/system/platform.c'].includes('#ifndef CONFIG_RICESTEP_STANDALONE\n    sys_network_manager_init(ipc_ready);'));
+  assert.ok(result['apps/arcs-mini/arcs_mini3.conf'].includes('CONFIG_ACOMP_WAKEUP=y'));
+  assert.ok(result['src/system/platform.c'].includes('#if CONFIG_ACOMP && !defined(CONFIG_RICESTEP_STANDALONE)'));
+  assert.ok(result['src/system/platform.c'].includes('app_wakeup_init(NULL)'));
+  assert.throws(() => buildPatches(name => name.endsWith('miniapp_storage.c') ? read(name).replace('int miniapp_storage_load(', 'int incompatible_storage_load(') : read(name)), /pinned source anchor/);
+});

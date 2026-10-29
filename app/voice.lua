@@ -4,7 +4,7 @@ function create_voice(options)
     options = type(options) == "table" and options or {}
     local enabled = options.enabled ~= false
     local base = options.base_url
-    if type(base) == "string" and (base:match("^https://") or base:match("^http://")) then
+    if type(base) == "string" and (base == "builtin://ricestep" or base:match("^https://") or base:match("^http://")) then
         base = base:gsub("/+$", "")
     else base = nil end
     local now, ticks, active, pending = 0, 0, nil, nil

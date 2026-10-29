@@ -270,9 +270,15 @@ local function next_choice()
     draw()
 end
 local function clock_seconds()
-    if config.clock_enabled == false or type(clock) ~= "table" or type(clock.now) ~= "function" then return nil end
-    local now = clock.now()
-    if type(now) == "number" and now == now and now > 0 and now < math.huge then return now end
+    if config.clock_enabled == false or type(clock) ~= "table" then return nil end
+    if type(clock.monotonic) == "function" then
+        local now = clock.monotonic()
+        if type(now) == "number" and now == now and now > 0 and now < math.huge then return now end
+    end
+    if type(clock.now) == "function" then
+        local now = clock.now()
+        if type(now) == "number" and now == now and now > 0 and now < math.huge then return now end
+    end
     return nil
 end
 function on_start()

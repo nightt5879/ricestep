@@ -49,6 +49,23 @@ function on_start()
     advance(voice, 9000)
     equal(#calls.spoken, 0, "completed or interrupted clip is never reread")
 
+    voice, calls = fixture("builtin://ricestep")
+    ready(voice)
+    assert(voice.say("feed", "啊呜，好吃。"))
+    voice.update(20)
+    equal(calls.clips[1], "builtin://ricestep/feed.mp3", "standalone firmware selects its embedded clip")
+    calls.state = "playing"
+    voice.update(20)
+    calls.state = "idle"
+    voice.update(20)
+    equal(voice.debug().status, "completed", "embedded playback uses the same completion semantics")
+    equal(#calls.spoken, 0, "embedded playback never calls device TTS")
+    voice, calls = fixture("builtin://other")
+    ready(voice)
+    assert(voice.say("feed", "啊呜。"))
+    voice.update(20)
+    equal(#calls.clips, 0, "arbitrary builtin namespaces rejected")
+
     voice, calls = fixture("https://example.test/voice")
     ready(voice)
     assert(voice.say("hello", "先坐一会儿。", 0))
