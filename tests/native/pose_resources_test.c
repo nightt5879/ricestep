@@ -9,9 +9,10 @@ static const uint8_t *reference;
 static int callback_failure, wrong_digest;
 #define CHECK(condition) do { ++assertions; if (!(condition)) { fprintf(stderr, "line %d: %s\n", __LINE__, #condition); exit(1); } } while (0)
 
-/* Test double for the hash provider: verify exact bytes against a separately
- * loaded JS-verified package, then supply its pinned digest. Production must
- * inject a real SHA-256 implementation. The packager tests exercise real SHA. */
+/* Test double for the hash provider: compare exact bytes with the test's
+ * reference, then supply its header digest. This is NOT a real SHA-256 check.
+ * The default reference is explicitly synthetic; optional file input must be
+ * verified with JS validateModelWindow() before invoking this executable. */
 static int digest(void *context, const uint8_t *data, size_t bytes, uint8_t out[32])
 {
     ++calls;
@@ -31,16 +32,45 @@ static void rejected(uint8_t *window, size_t length, rp_status status, unsigned 
     CHECK(view.data == NULL && view.bytes == 0);
     CHECK(calls == expected_calls);
 }
+static void write_u32(uint8_t *p, uint32_t value)
+{
+    for (unsigned i = 0; i < 4; ++i) p[i] = (uint8_t)(value >> (i * 8));
+}
+static void synthetic_reference(uint8_t *bytes)
+{
+    /* Explicit wire fixture only. This is not a trained/usable TFLite model,
+     * and its bytes do not have the model digest written in the header. */
+    static const uint8_t model_sha[32] = {
+        0x90,0x51,0xa5,0xce,0xeb,0xc1,0xeb,0x5f,0x53,0x5c,0x1b,0x1a,0xfe,0x58,0xd3,0x3c,
+        0xe8,0x78,0xbf,0x93,0x58,0xa1,0x59,0xcb,0xfc,0x68,0x9c,0x1a,0xbe,0xbf,0x9c,0x68
+    };
+    static const uint8_t source_sha[32] = {
+        0xcd,0x7c,0xc2,0x2f,0xa9,0x46,0xe5,0xd1,0x46,0xa7,0xb9,0x8d,0x49,0x68,0x53,0xe1,
+        0x92,0x3e,0x22,0x82,0x8d,0x39,0x72,0xd5,0x79,0x97,0x3f,0x27,0xf9,0x1b,0xb1,0x05
+    };
+    const uint32_t fields[] = {1, 4096, 1, 1, 4096, 2891896, 3145728, 1, 3, 1};
+    memset(bytes, 0xff, RP_WINDOW_BYTES);
+    memset(bytes, 0, RP_HEADER_BYTES);
+    memcpy(bytes, "RICEPOSE", 8);
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) write_u32(bytes + 8 + i * 4, fields[i]);
+    memcpy(bytes + 64, model_sha, sizeof(model_sha));
+    memcpy(bytes + 96, source_sha, sizeof(source_sha));
+    memset(bytes + RP_HEADER_BYTES, 0xa5, RP_MODEL_BYTES);
+    write_u32(bytes + RP_HEADER_BYTES, 16);
+    memcpy(bytes + RP_HEADER_BYTES + 4, "TFL3", 4);
+}
 int main(int argc, char **argv)
 {
-    CHECK(argc == 2);
-    FILE *f = fopen(argv[1], "rb"); CHECK(f != NULL);
+    CHECK(argc == 1 || argc == 2);
     uint8_t *raw = malloc(RP_WINDOW_BYTES + 16u);
     uint8_t *golden = malloc(RP_WINDOW_BYTES);
     CHECK(raw != NULL && golden != NULL);
     uint8_t *window = (uint8_t *)(((uintptr_t)raw + 15u) & ~(uintptr_t)15u);
-    CHECK(fread(golden, 1, RP_WINDOW_BYTES, f) == RP_WINDOW_BYTES);
-    CHECK(fgetc(f) == EOF); fclose(f);
+    if (argc == 2) {
+        FILE *f = fopen(argv[1], "rb"); CHECK(f != NULL);
+        CHECK(fread(golden, 1, RP_WINDOW_BYTES, f) == RP_WINDOW_BYTES);
+        CHECK(fgetc(f) == EOF); fclose(f);
+    } else synthetic_reference(golden);
     reference = golden; memcpy(window, reference, RP_WINDOW_BYTES);
     rp_model_view view;
     CHECK(rp_model_validate(window, RP_WINDOW_BYTES, digest, &calls, &view) == RP_OK);
@@ -74,6 +104,7 @@ int main(int argc, char **argv)
     window[RP_WINDOW_BYTES - 1u] = 0;
     CHECK(rp_model_validate(window, RP_WINDOW_BYTES, digest, &calls, &view) == RP_OK);
     free(raw); free(golden);
-    printf("pose resource validator: %u assertions passed (injected hash test double).\n", assertions);
+    printf("pose resource validator: %u assertions passed (%s; injected hash test double, no cryptographic or hardware claim).\n",
+        assertions, argc == 1 ? "synthetic header/model bytes, no real model" : "explicit prepared model-window bytes");
     return 0;
 }

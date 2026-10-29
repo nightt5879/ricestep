@@ -2,13 +2,20 @@
 
 This component and `scripts/prepare-pose-resources.cjs` prepare and validate local files. Neither accesses hardware, changes the SDK/stock profile, flashes a device, or installs a runtime hook. The output requires a future CP firmware that understands this resource profile.
 
-From the repository root, with the pinned inputs already cached:
+Portable C unit tests run in a fresh checkout without stock resources, model downloads or Node:
+
+```powershell
+pwsh -File scripts/test-pose-resources.ps1
+pwsh -File scripts/test-pose-resources.ps1 -Compiler clang
+```
+
+With the pinned inputs cached, build and verify the actual package separately:
 
 ```powershell
 node scripts/prepare-pose-resources.cjs
 node scripts/prepare-pose-resources.cjs --verify dist/native/pose-resources
-pwsh -File scripts/test-pose-resources.ps1
-pwsh -File scripts/test-pose-resources.ps1 -Compiler clang
+node --test tests/pose-resources.test.cjs
+pwsh -File scripts/test-pose-resources.ps1 -Compiler clang -ModelWindow dist/native/pose-resources/pose.bin
 ```
 
 Inputs default to `.cache/stock-recovery-mini3/{tone,emoji,respak}.bin` and `.cache/pose-probe/movenet-heads-host-probe.tflite`; `--stock-root` and `--model` override only the file locations, never the pinned hashes. Output defaults to ignored `dist/native/pose-resources`; `--output` changes that directory. All input checks finish before output writes. The packager refuses input/SDK destinations.
@@ -55,6 +62,8 @@ The injected callback returns zero only after filling all 32 digest bytes. A nul
 
 The Node tests use real SHA-256 over the exact cached model and stock resources. They cover deterministic packing, every header field/reserved range, truncation, wrong payload/hash, erased padding, reserved-region bounds, malformed profiles, incorrect aggregate images and coordinated manifest edits. Tests that require the ignored original binaries explicitly skip when those inputs are absent.
 
-The C test uses a hash-provider test double that compares the full payload against a separately loaded package already verified by Node; it covers callback behavior, errors, pointer lifetime contract, header parsing and failure views. It does **not** validate a production cryptographic library. Run the Node verifier before the C harness, as `test-pose-resources.ps1` does.
+The C tests always run. By default they construct an explicit synthetic header/model fixture in memory and use a hash-provider test double. The fixture is not a trained or usable model, and its bytes deliberately do not have the pinned digest. This exercises header parsing, complete payload comparison by the test callback, callback errors, corruption rejection and cleared failure views without requiring ignored cache files. It does **not** validate a real model or cryptographic library.
+
+The optional explicit `-ModelWindow` parameter adds a second run using a prepared `pose.bin`. The runner first calls the packager's exported `validateModelWindow()` to perform actual SHA-256/wire validation, then runs the same C callback-contract tests over those verified bytes. Missing or corrupt explicit input is an error, not a skipped test. Node packaging tests remain separate, and only their real-cache cases skip when original binaries are absent.
 
 Still required: matching CP address patches and disabled legacy OTA/resource writers; actual ROMFS relocation tests; integration with an actual SHA-256 implementation, model engine and read-only Flash mapping; resource recovery plan and hardware validation. Do not flash this output into an unmodified stock firmware layout. See `docs/native-pose-integration.md` for the full capacity analysis.
