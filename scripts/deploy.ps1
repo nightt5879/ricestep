@@ -5,7 +5,8 @@ param([Parameter(Mandatory = $true)][string]$Serial)
 $adb = Get-AdbPath
 $state = & $adb -s $Serial get-state 2>&1
 if ($LASTEXITCODE -ne 0 -or "$state".Trim() -ne 'device') { throw 'The selected device is not ready.' }
-& (Join-Path $PSScriptRoot 'build.ps1')
+$voice = & (Join-Path $PSScriptRoot 'start-voice-server.ps1')
+& (Join-Path $PSScriptRoot 'build.ps1') -VoiceBaseUrl $voice.BaseUrl
 $backupDirectory = Join-Path $RepoRoot '.cache/device-backup'
 $null = New-Item -ItemType Directory -Path $backupDirectory -Force
 $backup = Join-Path $backupDirectory "before-deploy-$([Guid]::NewGuid().ToString('N')).lua"

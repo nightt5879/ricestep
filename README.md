@@ -50,8 +50,8 @@ pwsh -File scripts/dev.ps1
 固定台词采用轻亮女声 Xiaoyi，语速 −12%、音高 +4Hz，以慢半拍的停顿和小笨蛋式台词表现蠢萌贪吃；喂饭、锅巴两句试听已获用户认可。MP3 已随仓库保存。上板试听由同一局域网中的电脑提供音频；电脑和服务需要保持运行。
 
 ```powershell
-# 把示例地址换成电脑实际局域网 IPv4
-node scripts/voice-server.cjs --host 192.168.1.100 --port 8770
+# 先配置下面的 .voice-config.json，再启动隐藏的后台语音服务
+pwsh -File scripts/start-voice-server.ps1
 ```
 
 在仓库根目录创建不提交的 `.voice-config.json`，然后重新构建、部署：
@@ -60,7 +60,9 @@ node scripts/voice-server.cjs --host 192.168.1.100 --port 8770
 {"base_url":"http://192.168.1.100:8770/voice/v1"}
 ```
 
-服务只提供语音清单内的 MP3。板卡已实际验证 `audio.play(URL)` 返回 `true`，播放状态经过 `loading → playing → idle`；两句代表性声音已试听认可，其余台词沿用同一音色参数。音频再生成、回退和测试说明见[语音文档](docs/voice.md)。
+服务只提供语音清单内的 MP3。启动脚本和部署都会验证用户认可的喂饭音频 SHA-256 及路由白名单；已有健康服务直接复用。仅当配置是本机实际持有的私有 IPv4 时自动启动，日志与进程记录保存在 `.cache/voice-server/`，不修改网络配置或设置开机自启。
+
+板卡已实际验证 `audio.play(URL)` 返回 `true`，播放状态经过 `loading → playing → idle`；两句代表性声音已试听认可，其余台词沿用同一音色参数。断网或播放失败时保留字幕和表情，**不回退到设备原声 TTS**。音频再生成与测试说明见[语音文档](docs/voice.md)。
 
 ## 上板
 
@@ -87,7 +89,7 @@ pwsh -File scripts/build.ps1
 | --- | --- |
 | `app/game.lua` | 喂饭、专注、煮饭、收藏与存档规则；保留旧散步规则 |
 | `app/main.lua` | 桌面陪伴、单键交互与声音反馈 |
-| `app/voice.lua` | 角色短语音播放、状态与设备TTS回退 |
+| `app/voice.lua` | 已审核角色短语音播放与状态；不可用时保留字幕 |
 | `app/character.lua` | 编码后的角色六态 |
 | `assets/audio/v1/` | 14句MP3、台词和音频校验清单 |
 | `app/step-sync.lua` | 暂不打包的旧步数传输模块 |

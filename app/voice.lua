@@ -1,5 +1,5 @@
 -- One owned utterance and one short-lived pending line. No playback during startup.
--- Recorded clips use the Mini3 API 5 HTTP audio player; older runtimes use TTS.
+-- Character voice is clip-only. Missing audio stays silent; never use system TTS.
 function create_voice(options)
     options = type(options) == "table" and options or {}
     local enabled = options.enabled ~= false
@@ -29,21 +29,8 @@ function create_voice(options)
         if active.mode == "audio" then
             -- Only accepted audio.play requests are marked as owned.
             audio.stop()
-        elseif active.mode == "tts" then
-            if type(tts) ~= "table" or type(tts.cancel) ~= "function" then return false end
-            tts.cancel(active.id)
         end
         return true
-    end
-    local function start_tts(line, started)
-        if type(tts) ~= "table" or type(tts.speak) ~= "function" then
-            clear("unavailable")
-            return
-        end
-        local id = tts.speak(line.text)
-        if type(id) ~= "number" then clear("failed"); return end
-        active = {line = line, mode = "tts", id = id, started = started or now}
-        last_status = "speaking"
     end
     local function start(line)
         if audio_available() then
@@ -52,9 +39,9 @@ function create_voice(options)
                 last_status = "loading"
             else
                 -- A rejected request owns no audio channel and must not stop it.
-                start_tts(line)
+                clear("unavailable")
             end
-        else start_tts(line) end
+        else clear("unavailable") end
     end
 
     function voice.say(key, text, priority)
@@ -92,12 +79,9 @@ function create_voice(options)
                 elseif elapsed >= 15000 then
                     stop_owned(); clear("timeout")
                 elseif not active.played and elapsed >= 8000 then
-                    local line, started = active.line, active.started
                     stop_owned()
-                    start_tts(line, started)
+                    clear("unavailable")
                 end
-            elseif elapsed >= 15000 then
-                stop_owned(); clear("timeout")
             end
         end
         if active and pending and (pending.priority > active.line.priority or pending.priority == 2) then
@@ -111,9 +95,7 @@ function create_voice(options)
     end
 
     function voice.on_tts_result(id, result)
-        if active and active.mode == "tts" and active.id == id then
-            clear(type(result) == "table" and result.status or "completed")
-        end
+        -- Device/system speech belongs to another owner, not this character.
     end
     function voice.busy()
         return active ~= nil or pending ~= nil or audio_state() ~= "idle"

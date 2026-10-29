@@ -48,12 +48,13 @@ $voicePath = Join-Path $testDirectory 'voice.lua'
 & node (Join-Path $PSScriptRoot 'minify-lua.cjs') $voicePath
 if ($LASTEXITCODE -ne 0) { throw 'Voice test compaction failed.' }
 Invoke-Headless -Source $voicePath -Image (Join-Path $testDirectory 'voice.png')
-Write-Host 'Voice queue, interruption and network fallback tests passed.'
+Write-Host 'Voice queue, interruption and no-system-voice regression tests passed.'
 & (Join-Path $PSScriptRoot 'verify-render.ps1')
 & node --test --test-reporter=dot (Join-Path $PSScriptRoot 'rectangle-encoder.test.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Sprite encoder tests failed.' }
 & node --test --test-reporter=dot (Join-Path $RepoRoot 'tests/voice-server.test.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Voice server tests failed.' }
+& (Join-Path $RepoRoot 'tests/start-voice-server.test.ps1')
 $relaySpec = Join-Path $RepoRoot 'tests/step-relay.test.cjs'
 if (Test-Path -LiteralPath $relaySpec) {
     & node --test --test-reporter=dot $relaySpec
