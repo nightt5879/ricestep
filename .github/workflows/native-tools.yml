@@ -1,0 +1,26 @@
+name: Fetch official native tools
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/native-tools.yml'
+      - 'scripts/fetch-native-tools.ps1'
+permissions:
+  contents: read
+jobs:
+  download:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Fetch versioned vendor packages without executing them
+        shell: pwsh
+        run: ./scripts/fetch-native-tools.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: official-mini3-windows-tools
+          path: .cache/native-tool-download/
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
