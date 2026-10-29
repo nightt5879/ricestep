@@ -59,6 +59,29 @@ static void unpack(const uint8_t *p, pi_pixel_format format, uint8_t rgb[3])
     rgb[2] = (uint8_t)((blue << 3U) | (blue >> 2U));
 }
 
+typedef struct {
+    uint16_t first, second, fraction;
+} sample_axis;
+
+/* Exact half-pixel coordinate: ((2*d+1)*source-resized)/(2*resized).
+ * C division truncates negative values, so correct it to floor before clamping
+ * each neighbor. Fractions are integer numerators with denominator 2*resized. */
+static sample_axis axis_sample(uint32_t d, uint32_t source, uint32_t resized)
+{
+    const int32_t denominator = (int32_t)(2U * resized);
+    const int32_t numerator = (int32_t)((2U * d + 1U) * source) - (int32_t)resized;
+    int32_t first = numerator / denominator;
+    int32_t fraction = numerator % denominator;
+    int32_t second;
+    sample_axis sample;
+    if (fraction < 0) { --first; fraction += denominator; }
+    second = first + 1;
+    sample.first = (uint16_t)(first < 0 ? 0 : first >= (int32_t)source ? source - 1U : (uint32_t)first);
+    sample.second = (uint16_t)(second < 0 ? 0 : second >= (int32_t)source ? source - 1U : (uint32_t)second);
+    sample.fraction = (uint16_t)fraction;
+    return sample;
+}
+
 pi_status pi_prepare(const pi_frame *frame, int8_t *tensor,
                      size_t tensor_size, pi_transform *transform)
 {
@@ -66,6 +89,7 @@ pi_status pi_prepare(const pi_frame *frame, int8_t *tensor,
     pi_transform t;
     size_t bytes_per_pixel, row_bytes, required;
     uint32_t y, x;
+    sample_axis columns[PI_INPUT_WIDTH];
     size_t i;
     if (frame == NULL || tensor == NULL || transform == NULL) return PI_INVALID_ARGUMENT;
     f = *frame; /* The descriptor itself need not outlive the call. */
@@ -88,18 +112,36 @@ pi_status pi_prepare(const pi_frame *frame, int8_t *tensor,
         overlaps(tensor, PI_INPUT_BYTES, transform, sizeof(*transform))) return PI_BUFFER_OVERLAP;
 
     t = make_transform(f.width, f.height);
+    for (x = 0; x < t.resized_width; ++x)
+        columns[x] = axis_sample(x, f.width, t.resized_width);
     for (i = 0; i < PI_INPUT_BYTES; ++i) tensor[i] = -128;
     for (y = 0; y < t.resized_height; ++y) {
-        const uint32_t source_y = ((2U * y + 1U) * f.height) / (2U * t.resized_height);
-        const uint8_t *row = f.data + source_y * f.stride_bytes;
+        const sample_axis rows = axis_sample(y, f.height, t.resized_height);
+        const uint32_t dx = 2U * t.resized_width, dy = 2U * t.resized_height;
+        const uint32_t denominator = dx * dy;
+        const uint8_t *row0 = f.data + rows.first * f.stride_bytes;
+        const uint8_t *row1 = f.data + rows.second * f.stride_bytes;
         for (x = 0; x < t.resized_width; ++x) {
-            const uint32_t source_x = ((2U * x + 1U) * f.width) / (2U * t.resized_width);
-            uint8_t rgb[3];
+            const sample_axis column = columns[x];
+            const uint32_t w00 = (dx - column.fraction) * (dy - rows.fraction);
+            const uint32_t w01 = column.fraction * (dy - rows.fraction);
+            const uint32_t w10 = (dx - column.fraction) * rows.fraction;
+            const uint32_t w11 = column.fraction * rows.fraction;
+            uint8_t rgb00[3], rgb01[3], rgb10[3], rgb11[3];
+            unsigned channel;
             const size_t dest = ((y + t.pad_top) * PI_INPUT_WIDTH + x + t.pad_left) * 3U;
-            unpack(row + source_x * bytes_per_pixel, f.format, rgb);
-            tensor[dest] = (int8_t)((int)rgb[0] - 128);
-            tensor[dest + 1U] = (int8_t)((int)rgb[1] - 128);
-            tensor[dest + 2U] = (int8_t)((int)rgb[2] - 128);
+            unpack(row0 + column.first * bytes_per_pixel, f.format, rgb00);
+            unpack(row0 + column.second * bytes_per_pixel, f.format, rgb01);
+            unpack(row1 + column.first * bytes_per_pixel, f.format, rgb10);
+            unpack(row1 + column.second * bytes_per_pixel, f.format, rgb11);
+            for (channel = 0; channel < 3U; ++channel) {
+                /* Weights sum to denominator <= 384*384. The largest possible
+                 * sum is 255*147456=37,601,280, safely within uint32_t. Divide
+                 * only once: exact rational interpolation, final RGB floor. */
+                const uint32_t sum = rgb00[channel] * w00 + rgb01[channel] * w01 +
+                                     rgb10[channel] * w10 + rgb11[channel] * w11;
+                tensor[dest + channel] = (int8_t)((int)(sum / denominator) - 128);
+            }
         }
     }
     *transform = t;

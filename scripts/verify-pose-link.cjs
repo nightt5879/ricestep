@@ -20,6 +20,9 @@ function verify(elfBytes, commands) {
     if (matches.length !== 1) throw new Error(`Missing linked CPU operator: ${op}`);
     return { operator: op, symbol: matches[0].name, bytes: matches[0].size };
   });
+  const pointwise = elf.symbols.filter(s => s.name.includes('17RegisterPointwiseEv') &&
+    s.sectionIndex !== 0 && s.type === 2 && s.size > 0);
+  if (pointwise.length !== 1) throw new Error('Missing linked pointwise registration');
   const selected = commands.filter(c => /(?:tflm-source[\\/]|standalone[\\/]pose_components[\\/])/.test(c.file));
   if (selected.length < 42) throw new Error('Incomplete pose/TFLM compile-command evidence');
   for (const entry of selected) {
@@ -32,9 +35,12 @@ function verify(elfBytes, commands) {
     if (flags.filter(f => /^-[DU]NDEBUG(?:=.*)?$/.test(f)).at(-1) !== '-DNDEBUG') {
       throw new Error(`Inference library needs consistent private release checks: ${entry.file}`);
     }
-    if (/[\\/]kernels[\\/](?:conv|depthwise_conv)\.cc$/.test(entry.file) &&
+    if ((/[\\/]kernels[\\/](?:conv|depthwise_conv)\.cc$/.test(entry.file) || /[\\/]pose_pointwise\.cc$/.test(entry.file)) &&
         flags.filter(f => /^-O(?:[0-3sgz]|fast)$/.test(f)).at(-1) !== '-O3') {
       throw new Error(`Hot convolution kernel needs final -O3: ${entry.file}`);
+    }
+    if (flags.some(f => /^-DRICESTEP_POINTWISE_TEST_STATS(?:=.*)?$/.test(f))) {
+      throw new Error('Test-only pointwise counters leaked into native firmware');
     }
   }
   // A PUBLIC NDEBUG would silently turn off assertions in the Lua/app target.
@@ -47,7 +53,8 @@ function verify(elfBytes, commands) {
   }
   return { scope: 'Mini3 ELF static linkage only; no runtime execution or hardware validation',
     elfSha256: crypto.createHash('sha256').update(elfBytes).digest('hex'),
-    checkedCompilationUnits: selected.length, symbols, operators, cameraStarted: false, flashed: false };
+    checkedCompilationUnits: selected.length, symbols, operators,
+    pointwiseRegistration: pointwise[0].name, cameraStarted: false, flashed: false };
 }
 if (require.main === module) {
   const [elf, commands, output] = process.argv.slice(2);

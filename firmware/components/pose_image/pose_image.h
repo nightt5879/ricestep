@@ -59,7 +59,8 @@ typedef enum {
 /* No allocation, I/O, camera ownership, rotation, mirror or model inference.
  * Produces NHWC [1,192,192,3] RGB INT8: byte = RGB uint8 - 128, scale=1,
  * zero_point=-128. Black letterbox = -128. Caller owns all buffers.
- * Center nearest sampling: src = floor((dst + 0.5) * source / resized).
+ * Bilinear at src = (dst + 0.5) * source / resized - 0.5, edge-clamped
+ * neighbors. Exact integer weights; floor final positive RGB once, no antialias.
  * Fit the long dimension to 192; round the short dimension half-up, minimum 1.
  * Split odd padding with the extra pixel at right/bottom.
  * Input pixels, output tensor and output transform must not overlap.

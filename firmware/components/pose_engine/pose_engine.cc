@@ -1,4 +1,5 @@
 #include "pose_engine.h"
+#include "pose_pointwise.h"
 
 #include <cstdint>
 #include <new>
@@ -203,7 +204,7 @@ extern "C" pose_engine_status pose_engine_prepare(
     auto *engine = new (context) pose_engine();
     if (engine->resolver.AddSub() != tflite::micro::kTfLiteOk ||
         engine->resolver.AddMul() != tflite::micro::kTfLiteOk ||
-        engine->resolver.AddConv2D() != tflite::micro::kTfLiteOk ||
+        engine->resolver.AddConv2D(ricestep::pointwise::RegisterPointwise()) != tflite::micro::kTfLiteOk ||
         engine->resolver.AddDepthwiseConv2D() != tflite::micro::kTfLiteOk ||
         engine->resolver.AddAdd() != tflite::micro::kTfLiteOk ||
         engine->resolver.AddResizeBilinear() != tflite::micro::kTfLiteOk) {

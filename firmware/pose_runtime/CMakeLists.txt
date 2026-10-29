@@ -42,6 +42,7 @@ target_compile_definitions(ricestep_tflm PUBLIC
 
 add_library(ricestep_pose STATIC
     "${RICESTEP_COMPONENTS_ROOT}/pose_engine/pose_engine.cc"
+    "${RICESTEP_COMPONENTS_ROOT}/pose_pointwise/pose_pointwise.cc"
     "${RICESTEP_COMPONENTS_ROOT}/pose_decode/pose_movenet.c"
     "${RICESTEP_COMPONENTS_ROOT}/pose_image/pose_image.c"
     "${RICESTEP_COMPONENTS_ROOT}/pose_resources/pose_resources.c"
@@ -49,6 +50,7 @@ add_library(ricestep_pose STATIC
     "${RICESTEP_COMPONENTS_ROOT}/pose_session/pose_session.c")
 target_include_directories(ricestep_pose PUBLIC
     "${RICESTEP_COMPONENTS_ROOT}/pose_engine"
+    "${RICESTEP_COMPONENTS_ROOT}/pose_pointwise"
     "${RICESTEP_COMPONENTS_ROOT}/pose_decode"
     "${RICESTEP_COMPONENTS_ROOT}/pose_image"
     "${RICESTEP_COMPONENTS_ROOT}/pose_resources"
@@ -91,6 +93,8 @@ endif()
 
 # The reference convolution kernels otherwise make checked multidimensional
 # Offset calls for every MAC under -Os. Keep exact arithmetic, but let these two
-# hot translation units inline/hoist indexing. Applied last, after SDK flags.
+# hot upstream translation units inline/hoist indexing. The project pointwise
+# kernel also needs O3 for its register-only dot loops. Applied after SDK flags.
 set_property(SOURCE "${micro}/kernels/conv.cc" "${micro}/kernels/depthwise_conv.cc"
+    "${RICESTEP_COMPONENTS_ROOT}/pose_pointwise/pose_pointwise.cc"
     APPEND PROPERTY COMPILE_OPTIONS -O3)

@@ -1,9 +1,9 @@
 # Camera image → pose tensor
 
-Portable C11 preprocessing, with no allocation, camera calls, network, model
-execution, or hidden rotation/mirroring. This component is **not yet connected to
-Mini3 capture or inference**. Host tests use synthetic pixels and do not establish
-pose accuracy, camera colour order, or board performance.
+Portable C11 preprocessing, with no heap allocation, camera calls, network, model
+execution, or hidden rotation/mirroring. Capture and inference ownership remain
+with the caller. Host pixel tests do not establish pose accuracy, camera colour
+order, or board performance.
 
 ## Source format evidence
 
@@ -42,17 +42,56 @@ odd padding pixel to the right/bottom. There is no crop. Rounding can slightly
 change the resized aspect; the inverse transform uses the actual integer sizes.
 For 320×240 input, the active image is 192×144 with 24 black rows above and below.
 
-Sampling is deliberately deterministic **nearest neighbour at output centres**:
+Sampling uses deterministic **half-pixel bilinear interpolation**, preserving
+the entire input field of view:
 
 ```text
-source_x = floor((destination_x + 0.5) × source_width / resized_width)
-source_y = floor((destination_y + 0.5) × source_height / resized_height)
+source_x = (destination_x + 0.5) × source_width / resized_width - 0.5
+source_y = (destination_y + 0.5) × source_height / resized_height - 0.5
 ```
 
-Integer arithmetic implements this expression exactly. Upsampling is permitted.
-Nearest sampling is not anti-aliased; compare real pose results before changing
-the production resize policy. This is a bounded, testable preprocessing path,
-not an accuracy claim or a substitute for testing real frames.
+For each axis, represent this coordinate exactly as
+`n / den = ((2*d+1)*source-resized) / (2*resized)`. Take mathematical floor
+`i=floor(n/den)` (including negative upsampling coordinates), and remainder
+`r=n-i*den`. Clamp neighbors `i` and `i+1` independently to the image edges.
+Unpack RGB565 channels **before** interpolating. With `dx=2*resized_width`,
+`dy=2*resized_height`, and remainders `rx/ry`, each output channel is:
+
+```text
+floor((p00*(dx-rx)*(dy-ry) + p01*rx*(dy-ry)
+     + p10*(dx-rx)*ry      + p11*rx*ry) / (dx*dy))
+```
+
+There is one final positive integer division; no intermediate rounding, added
+half-unit, floating-point resize, or antialias filter. Apply RGB−128 only after
+this final floor. Upsampling and one-pixel dimensions are supported. The weights
+sum to at most `384*384=147456`, so the largest weighted sum is
+`255*147456=37,601,280`, within uint32. Source indices fit uint16 under the checked
+4096-pixel dimension limit. A 192-entry axis table takes 1,152 bytes of stack;
+there is no full intermediate RGB image or retained scratch storage.
+
+The coordinate geometry matches the half-pixel branch of upstream TFLM
+`ComputeInterpolationValues` (`align_corners=false`, `half_pixel_centers=true`),
+in `tensorflow/lite/micro/kernels/internal/reference/resize_bilinear.h` at pinned
+commit `fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb`. **This is not a claim of
+bit-for-bit TensorFlow float rounding or TFLite quantized-resize equivalence.**
+The local implementation uses exact rational weights and a specified final
+floor; floating-point arithmetic can cross an integer boundary by rounding.
+
+A cached, host-only comparison on the 65-frame public squat clip described in
+[exercise validation](../../../docs/pose-exercise-validation.md) tested this
+integer policy against float64 bilinear followed by floor. All 65 prepared
+inputs differed in some channels, by at most one RGB value (125,316 channel
+differences in total). With the unchanged model, C decoder, session gates and
+synthetic 100 ms processing age, integer interpolation yielded 3/65 frames with
+a qualifying shoulder/hip/knee/ankle side; float64 yielded 2/65. Both counted zero
+repetitions. Neither policy qualified a complete side on the additional yoga
+photo. Those confidence results are not annotated accuracy measurements, and
+do not show that exercise counting is ready. Local exploratory artifacts live
+in ignored `.cache/pose-preprocess-floor-audit`; they require the cached model,
+video and isolated interpreter dependencies and are not a fresh-clone test.
+Earlier nearest-neighbor and round-to-nearest bilinear reports are historical
+comparisons; neither describes the current pixel policy.
 
 ## Geometry passed to motion_logic
 
@@ -72,7 +111,7 @@ old point or project it onto an image edge. Boundary coordinates 0 and 1 are val
 
 Successful results contain original-frame normalized `x/y` and
 `image_aspect = source_width/source_height`, matching `ml_pose`. Confidence,
-COCO17 ordering, a stable subject ID and capture timestamps remain the caller's
+COCO17 ordering, track continuity and capture timestamps remain the caller's
 responsibility. “Original frame” means the supplied buffer after any orientation
 already performed by the camera service, not raw sensor coordinates.
 
@@ -85,7 +124,7 @@ already performed by the camera service, not raw sensor coordinates.
   trailing padding. Checked size arithmetic prevents row/address wraparound.
 - The tensor's extra capacity is untouched. On any validation failure, neither
   tensor nor transform is changed. The returned status must be checked.
-- The module keeps no state, pointers, scratch allocations or camera ownership.
+- The module keeps no state, pointers, heap allocations or camera ownership.
   Release a borrowed camera framebuffer only after preprocessing finishes, or
   use a stable service-owned copy. Capture integration must enforce this lifetime.
 
@@ -97,7 +136,13 @@ pwsh -File scripts/test-pose-image.ps1 -Compiler 'C:/Program Files/LLVM/bin/clan
 ```
 
 The fixtures verify RGB565 byte order/bit expansion, RGB888 identity and striding,
-quantization endpoints, Mini3-size letterboxing and exact centre samples, portrait
-and odd padding, maximum/narrow dimensions, inverse coordinates, nonfinite/padded
-landmarks, buffer overlap, truncated input/output, invalid settings, unchanged
-input, and output sentinels. They do not read camera hardware.
+quantization endpoints, Mini3-size letterboxing and bilinear golden samples,
+checkerboard averaging, final floor rather than nearest rounding, edge extension,
+portrait and odd padding, maximum/narrow dimensions, inverse coordinates,
+nonfinite/padded landmarks, buffer overlap, truncated input/output, invalid
+settings, unchanged input, and output sentinels. An independent int64 oracle
+scans source pixel centers using triangular reconstruction weights and compares
+every output channel for 27 format/geometry combinations. Exactly sized,
+unaligned allocations expose last-row/right-edge overreads to sanitizers.
+GCC, Clang and GCC AddressSanitizer/UndefinedBehaviorSanitizer pass 4,697,607
+checks. These tests do not read camera hardware.

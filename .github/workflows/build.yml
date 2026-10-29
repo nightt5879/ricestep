@@ -6,6 +6,28 @@ on:
 permissions:
   contents: read
 jobs:
+  pointwise:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check pointwise arithmetic with ASan and UBSan
+        # Runner tools: Node 20+, Python 3, CMake, GCC/G++, Make, Git and curl.
+        # Source archives and the upstream patch are verified by the lock helper;
+        # no model download, board firmware build, camera or audio is involved.
+        run: python3 scripts/test-pose-pointwise.py --jobs 2
+      - name: Upload pointwise validation report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pose-pointwise-regression
+          include-hidden-files: true
+          path: |
+            .cache/pose-pointwise-ci/setup.log
+            .cache/pose-pointwise-ci/build.log
+            .cache/pose-pointwise-ci/pointwise-test.log
+            .cache/pose-pointwise-ci/pointwise-report.json
+          if-no-files-found: warn
   windows:
     runs-on: windows-latest
     timeout-minutes: 10

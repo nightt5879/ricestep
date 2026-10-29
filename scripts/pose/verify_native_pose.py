@@ -79,7 +79,11 @@ def main():
             **{name: int(getattr(transform, name)) for name, _ in Transform._fields_},
             "input_sha256": hashlib.sha256(raw).hexdigest(),
             "output_sha256": hashlib.sha256(rgb).hexdigest(),
-            "resampling": "center-nearest", "board_validated": False}, indent=2) + "\n")
+            "resampling": "half-pixel-bilinear-integer-final-floor",
+            "edge_mode": "clamp", "antialias": False,
+            "source_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                              for p in (source, source.with_suffix('.h'))},
+            "board_validated": False}, indent=2) + "\n")
         print("Native RGB conversion/letterbox complete; no camera was opened.")
         return
 

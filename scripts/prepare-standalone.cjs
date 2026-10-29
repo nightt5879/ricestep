@@ -171,7 +171,7 @@ function prepare({ sdk, luaSource, apply = false, poseLinkCheck = false, poseRun
   // Keep ownership hashes even when the optional target is disabled. Switching
   // pose -> desk -> pose must not turn our generated files into unknown edits.
   files['apps/arcs-mini/standalone/pose_runtime/CMakeLists.txt'] = fs.readFileSync(path.join(ROOT, 'firmware/pose_runtime/CMakeLists.txt'));
-  for (const component of ['pose_engine', 'pose_decode', 'pose_image', 'pose_resources', 'motion_logic', 'pose_session']) {
+  for (const component of ['pose_engine', 'pose_pointwise', 'pose_decode', 'pose_image', 'pose_resources', 'motion_logic', 'pose_session']) {
     for (const name of fs.readdirSync(path.join(ROOT, 'firmware/components', component))) {
       if (!/\.(?:c|cc|h|inc)$/.test(name)) continue;
       files[`apps/arcs-mini/standalone/pose_components/${component}/${name}`] = fs.readFileSync(path.join(ROOT, 'firmware/components', component, name));

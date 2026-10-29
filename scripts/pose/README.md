@@ -76,7 +76,7 @@ python3 scripts/pose/verify_native_pose.py --python-path .cache/research-pose/tf
 # --rgb-input .cache/pose-native/input-192.rgb
 ```
 
-图像输入经过实际 C 的 center-nearest 等比例补边和量化。最终本机 44 个参考用例全部逐 float 一致；4 个完整输入的 Micro 四头与 LiteRT 四头均逐字节一致，Micro arena 仍为 1945792 字节。报告分别位于 `.cache/pose-oracle/results/oracle-report.json` 与 `.cache/pose-native/decode-parity.json`。这些是数值与主机链路证据，不是人体标注误差、运动计数准确率或板端 FPS。
+上述历史报告使用当时 C 的 center-nearest 等比例补边和量化：44 个参考用例全部逐 float 一致；4 个完整输入的 Micro 四头与 LiteRT 四头均逐字节一致，Micro arena 为 1945792 字节。报告分别位于 `.cache/pose-oracle/results/oracle-report.json` 与 `.cache/pose-native/decode-parity.json`。当前生产预处理已改为完整视野的整数双线性缩放，不能直接复用旧图像输入结果；新像素与源码 TFLM 的完整验证见[真实动作验证](../../docs/pose-exercise-validation.md)。这些是数值与主机链路证据，不是人体标注误差、运动计数准确率或板端 FPS。
 
 无 Python/模型依赖的 C 契约测试，以及目标对象编译检查：
 

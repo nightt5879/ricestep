@@ -39,6 +39,8 @@ test('actual compiled runtime requires matching CP, config, layout and compiler 
   assert.throws(() => check(elf, binary, config, manifest, mixedChecks), /private release/);
   const leakedChecks = commands.map(c => /standalone[\\/]rice_pose\.c$/.test(c.file) ? {...c, command: c.command + ' -DNDEBUG'} : c);
   assert.throws(() => check(elf, binary, config, manifest, leakedChecks), /leaked into application/);
+  const pointwiseStats = commands.map(c => /[\\/]pose_pointwise\.cc$/.test(c.file) ? {...c, command: c.command + ' -DRICESTEP_POINTWISE_TEST_STATS'} : c);
+  assert.throws(() => check(elf, binary, config, manifest, pointwiseStats), /Test-only pointwise counters/);
   const old = path.join(root, 'dist/native/pose-link-check/arcs-mini3-ricestep.elf');
   if (fs.existsSync(old)) assert.throws(() => check(fs.readFileSync(old)), /resource profile/);
 });

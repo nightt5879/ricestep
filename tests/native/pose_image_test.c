@@ -130,7 +130,7 @@ static void fill_coordinates(unsigned width, unsigned height)
         }
 }
 
-static void test_mini3_letterbox_and_center_sampling(void)
+static void test_mini3_letterbox_and_half_pixel_bilinear(void)
 {
     pi_frame f = frame(320, 240, PI_RGB888, 320U * 3U);
     pi_transform t;
@@ -144,13 +144,14 @@ static void test_mini3_letterbox_and_center_sampling(void)
     for (y = 0; y < 192; ++y)
         if (y < 24 || y >= 168)
             for (x = 0; x < 192; ++x) pixel(x, y, 0, 0, 0);
-    /* Independent golden samples: floor((d+.5)*320/192), likewise for y. */
+    /* Golden rational bilinear results, final floor. At (95,71), source
+     * coordinates are (158+2/3,118+2/3), including the blue channel's wrap. */
     pixel(0, 24, 0, 0, 0);
     pixel(1, 25, 2, 2, 4);
-    pixel(95, 95, 159, 119, 22);
+    pixel(95, 95, 158, 118, 21);
     pixel(96, 96, 160, 120, 24);
     pixel(190, 166, 61, 237, 42);
-    pixel(191, 167, 63, 239, 46);
+    pixel(191, 167, 62, 238, 45);
     guards();
 }
 
@@ -166,7 +167,7 @@ static void test_portrait_odd_and_extreme_aspect(void)
     pixel(168, 100, 0, 0, 0);
     pixel(24, 0, 0, 0, 0);
     pixel(25, 1, 2, 2, 4);
-    pixel(167, 191, 239, 63, 46);
+    pixel(167, 191, 238, 62, 45);
 
     memset(source, 255, sizeof(source));
     f = frame(7, 5, PI_RGB888, 21);
@@ -192,6 +193,153 @@ static void test_portrait_odd_and_extreme_aspect(void)
     pixel(95, 191, 255, 255, 255);
     pixel(96, 191, 0, 0, 0);
     guards();
+}
+
+/* Independent wide-integer oracle: scan source centers with a triangular
+ * reconstruction kernel. Clamp the rational coordinate before constructing
+ * support; do not reuse the production quotient/remainder or neighbor logic. */
+typedef struct {
+    uint32_t index[2], count;
+    uint64_t weight[2], denominator;
+} oracle_support;
+
+static oracle_support oracle_axis(uint32_t source_size, uint32_t resized, uint32_t d)
+{
+    oracle_support s = {{0, 0}, 0, {0, 0}, 2U * resized};
+    const int64_t den = (int64_t)s.denominator;
+    int64_t coordinate = (2 * (int64_t)d + 1) * source_size - resized;
+    const int64_t edge = (int64_t)(source_size - 1U) * den;
+    uint32_t k;
+    uint64_t total = 0;
+    if (coordinate < 0) coordinate = 0;
+    if (coordinate > edge) coordinate = edge;
+    for (k = 0; k < source_size; ++k) {
+        const int64_t distance = llabs((int64_t)k * den - coordinate);
+        if (distance < den) {
+            CHECK(s.count < 2);
+            s.index[s.count] = k;
+            s.weight[s.count] = (uint64_t)(den - distance);
+            total += s.weight[s.count++];
+        }
+    }
+    CHECK(total == s.denominator);
+    return s;
+}
+
+static uint64_t oracle_channel(const pi_frame *f, uint32_t x, uint32_t y, unsigned c)
+{
+    const uint8_t *p = f->data + y * f->stride_bytes;
+    uint32_t value, bits;
+    if (f->format == PI_RGB888) return p[x * 3U + c];
+    p += x * 2U;
+    value = f->format == PI_RGB565_BE ? p[0] * 256U + p[1] : p[1] * 256U + p[0];
+    if (c == 1) { bits = (value / 32U) % 64U; return bits * 4U + bits / 16U; }
+    bits = c == 0 ? value / 2048U : value % 32U;
+    return bits * 8U + bits / 4U;
+}
+
+static void verify_wide_oracle(const pi_frame *f, uint32_t rw, uint32_t rh,
+                               uint32_t left, uint32_t top)
+{
+    oracle_support xs[PI_INPUT_WIDTH], ys[PI_INPUT_HEIGHT];
+    uint32_t x, y;
+    unsigned c;
+    for (x = 0; x < rw; ++x) xs[x] = oracle_axis(f->width, rw, x);
+    for (y = 0; y < rh; ++y) ys[y] = oracle_axis(f->height, rh, y);
+    for (y = 0; y < PI_INPUT_HEIGHT; ++y) {
+        for (x = 0; x < PI_INPUT_WIDTH; ++x) {
+            for (c = 0; c < 3; ++c) {
+                uint64_t value = 0;
+                if (x >= left && x < left + rw && y >= top && y < top + rh) {
+                    const oracle_support *xx = &xs[x - left], *yy = &ys[y - top];
+                    unsigned a, b;
+                    for (a = 0; a < xx->count; ++a)
+                        for (b = 0; b < yy->count; ++b)
+                            value += oracle_channel(f, xx->index[a], yy->index[b], c) *
+                                     xx->weight[a] * yy->weight[b];
+                    value /= xx->denominator * yy->denominator;
+                }
+                CHECK(output.bytes[(y * PI_INPUT_WIDTH + x) * 3U + c] == (int)value - 128);
+            }
+        }
+    }
+}
+
+static void test_bilinear_checkerboard_and_final_floor(void)
+{
+    /* Upsampling extends edge pixels. The interior checkerboard differs from
+     * nearest sampling; 127.5 must become 127, not rounded 128. */
+    const uint8_t corners[] = {0, 0, 0, 255, 0, 255, 255, 255, 0, 0, 255, 255};
+    pi_frame f = {corners, sizeof(corners), 6, 2, 2, PI_RGB888};
+    pi_transform t;
+    reset_output();
+    CHECK(pi_prepare(&f, output.bytes, sizeof(output.bytes), &t) == PI_OK);
+    pixel(0, 0, 0, 0, 0);
+    pixel(191, 191, 0, 255, 255);
+    pixel(95, 95, 127, 126, 126);
+    pixel(96, 96, 127, 128, 128);
+    verify_wide_oracle(&f, 192, 192, 0, 0);
+
+    /* Exact 2:1 downsampling, each 2x2 region contains two zeros and two 255s.
+     * This also catches implementations that round intermediate axis results. */
+    f = frame(384, 192, PI_RGB888, 384U * 3U);
+    for (uint32_t y = 0; y < f.height; ++y)
+        for (uint32_t x = 0; x < f.width; ++x)
+            for (unsigned c = 0; c < 3; ++c)
+                source[(y * f.width + x) * 3U + c] = (uint8_t)(((x + y) % 2U) * 255U);
+    CHECK(pi_prepare(&f, output.bytes, sizeof(output.bytes), &t) == PI_OK);
+    CHECK(t.resized_width == 192 && t.resized_height == 96 && t.pad_top == 48);
+    pixel(0, 48, 127, 127, 127);
+    pixel(191, 143, 127, 127, 127);
+    verify_wide_oracle(&f, 192, 96, 0, 48);
+    guards();
+}
+
+static void test_bilinear_formats_and_bounds_against_wide_oracle(void)
+{
+    /* Explicit expected sizes avoid copying make_transform into the oracle. */
+    static const uint32_t sizes[][6] = {
+        {3, 2, 192, 128, 0, 32}, {7, 5, 192, 137, 0, 27},
+        {5, 7, 137, 192, 27, 0}, {193, 191, 192, 190, 0, 1},
+        {320, 240, 192, 144, 0, 24}, {240, 320, 144, 192, 24, 0},
+        {4096, 1, 192, 1, 0, 95}, {1, 4096, 1, 192, 95, 0},
+        {1, 1, 192, 192, 0, 0}
+    };
+    const pi_pixel_format formats[] = {PI_RGB888, PI_RGB565_LE, PI_RGB565_BE};
+    for (size_t shape = 0; shape < sizeof(sizes) / sizeof(sizes[0]); ++shape) {
+        for (size_t fmt = 0; fmt < sizeof(formats) / sizeof(formats[0]); ++fmt) {
+            const uint32_t *s = sizes[shape];
+            const size_t bytes = formats[fmt] == PI_RGB888 ? 3U : 2U;
+            const size_t stride = s[0] * bytes + 5U;
+            const size_t required = (s[1] - 1U) * stride + s[0] * bytes;
+            uint8_t *allocation = malloc(required + 1U), *saved = malloc(required);
+            pi_frame f = {NULL, required, stride, s[0], s[1], formats[fmt]};
+            pi_transform t;
+            uint32_t x, y;
+            CHECK(allocation != NULL && saved != NULL);
+            /* Unaligned, exactly bounded storage; sanitizer catches last-row
+             * and right-edge reads, including the absent trailing stride bytes. */
+            f.data = allocation + 1;
+            memset(allocation, 0xa7, required + 1U);
+            for (y = 0; y < s[1]; ++y) {
+                for (x = 0; x < s[0]; ++x) {
+                    uint8_t *p = allocation + 1U + y * stride + x * bytes;
+                    for (size_t c = 0; c < bytes; ++c)
+                        p[c] = (uint8_t)(x * 17U + y * 31U + x * y * 7U + c * 83U);
+                }
+            }
+            memcpy(saved, f.data, required);
+            reset_output();
+            CHECK(pi_prepare(&f, output.bytes, sizeof(output.bytes), &t) == PI_OK);
+            CHECK(t.resized_width == s[2] && t.resized_height == s[3]);
+            CHECK(t.pad_left == s[4] && t.pad_top == s[5]);
+            verify_wide_oracle(&f, s[2], s[3], s[4], s[5]);
+            CHECK(memcmp(saved, f.data, required) == 0 && allocation[0] == 0xa7);
+            guards();
+            free(saved);
+            free(allocation);
+        }
+    }
 }
 
 static void invalid_frame(pi_frame f, pi_status expected)
@@ -292,8 +440,10 @@ int main(void)
     test_rgb888_identity_stride_and_bounds();
     test_rgb565_explicit_byte_order();
     test_extra_output_capacity_untouched();
-    test_mini3_letterbox_and_center_sampling();
+    test_mini3_letterbox_and_half_pixel_bilinear();
     test_portrait_odd_and_extreme_aspect();
+    test_bilinear_checkerboard_and_final_floor();
+    test_bilinear_formats_and_bounds_against_wide_oracle();
     test_rejection_and_no_partial_output();
     test_inverse_geometry_and_bad_landmarks();
     printf("pose_image: %u checks passed (synthetic pixels; no camera/model claim).\n", checks);
