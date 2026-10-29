@@ -5,6 +5,7 @@ local fake_now, phase, focus_duration = 1793100000, 0, 10000
 clock = {now = function() return fake_now end}
 function create_game(options)
     options.focus_duration_ms = focus_duration
+    options.desk_interval_ms, options.desk_snooze_ms = 10000, 5000
     options.random = function() return 2 end
     return original_factory(options)
 end
@@ -133,5 +134,47 @@ function on_tick(dt_ms)
         end
         assert(wall_reads > 0, "fallback reads the calibrated clock")
         phase = 4
+    elseif phase == 4 then
+        local monotonic = 500
+        fake_now = 1793100000
+        clock = {monotonic = function() return monotonic end, now = function() return fake_now end}
+        actual_start()
+        for index = 1, 4 do on_button_click("function"); actual_tick(350) end
+        double_click(); double_click()
+        equal(ricestep_debug().state.desk_status, "active", "manual reminder starts through clock-enabled UI")
+        actual_tick(200)
+        equal(ricestep_debug().state.desk_remaining_ms, 10000, "duplicate clock sample cannot consume reminder time")
+        fake_now = fake_now - 10000
+        monotonic = monotonic + 1.25
+        actual_tick(20)
+        equal(ricestep_debug().state.desk_remaining_ms, 8750, "reminder follows monotonic time not animation delta or wall clock")
+        monotonic = monotonic + 10; actual_tick(20)
+        equal(ricestep_debug().state.desk_remaining_ms, 8750, "large reminder clock gap is rejected")
+        monotonic = monotonic - 2; actual_tick(20)
+        equal(ricestep_debug().state.desk_remaining_ms, 8750, "backwards reminder time is rejected")
+        monotonic = monotonic + 1; actual_tick(20)
+        equal(ricestep_debug().state.desk_remaining_ms, 7750, "normal reminder clock resumes after rejection")
+        on_button_click("function"); actual_tick(350); double_click()
+        equal(ricestep_debug().state.desk_status, "paused", "pause monotonic reminder")
+        monotonic = monotonic + 2; actual_tick(20)
+        equal(ricestep_debug().state.desk_remaining_ms, 7750, "paused monotonic seconds are excluded")
+        double_click()
+        monotonic = monotonic + 5; actual_tick(20)
+        monotonic = monotonic + 2.75; actual_tick(20)
+        equal(ricestep_debug().state.desk_status, "due", "accepted real elapsed seconds make reminder due")
+        monotonic = monotonic + 1; actual_tick(20)
+        equal(ricestep_debug().state.desk_remaining_ms, 0, "due remainder cannot go negative")
+        on_button_click("function"); actual_tick(350); double_click()
+        equal(ricestep_debug().state.desk_status, "snoozed", "monotonic reminder can snooze")
+        monotonic, fake_now = nil, nil
+        actual_tick(500)
+        equal(ricestep_debug().state.desk_remaining_ms, 4500, "missing clocks use logical tick duration once")
+        monotonic = 1000; actual_tick(20)
+        equal(ricestep_debug().state.desk_remaining_ms, 4500, "restored clock first establishes baseline")
+        monotonic = monotonic + 4.5; actual_tick(20)
+        equal(ricestep_debug().state.desk_status, "due", "snooze uses resumed clock without double counting")
+        equal(ricestep_debug().state.rice, 3, "reminder timing gives no rice")
+        equal(ricestep_debug().state.total_steps, 0, "reminder timing creates no exercise data")
+        phase = 5
     else actual_tick(dt_ms) end
 end

@@ -45,6 +45,7 @@ function create_voice()
 end
 function create_game(options)
     options.focus_duration_ms = 4000
+    options.desk_interval_ms, options.desk_snooze_ms = 4000, 1000
     options.random = function() return 6 end
     return real_factory(options)
 end
@@ -112,6 +113,17 @@ local scenarios = {
         for index = 1, 5 do single() end
     end},
     {"home/save failure", function() boot(); fail_save = true; actual_tick(5000); actual_tick(5000) end},
+    {"desk/off", function() boot(); single(); single(); single(); single(); double() end},
+    {"desk/active", function() double(); actual_tick(500) end},
+    {"desk/paused", function() single(); double() end},
+    {"desk/due", function() double(); actual_tick(4000) end},
+    {"home/due reminder", function()
+        single(); single(); single(); double()
+        check(ricestep_debug().page == "home", "due reminder can return home")
+        double()
+    end},
+    {"desk/snoozed", function() single(); double(); actual_tick(100) end},
+    {"desk/closed", function() single(); single(); double() end},
 }
 function on_start()
     phase = 0
@@ -125,7 +137,7 @@ function on_tick()
     if action then scenario = action[1]; action[2](); return end
     if phase ~= #scenarios + 1 then return end
     for pose = 1, 6 do check(seen_poses[pose], "pose " .. pose .. " was not covered") end
-    for _, page in ipairs({"home", "focus", "focus_confirm", "cook", "cook_result", "bag"}) do
+    for _, page in ipairs({"home", "focus", "focus_confirm", "cook", "cook_result", "bag", "desk"}) do
         check(seen_pages[page], "page " .. page .. " was not covered")
     end
     real_screen.begin(0xFFF5E5)

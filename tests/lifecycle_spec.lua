@@ -124,5 +124,43 @@ function on_tick(dt_ms)
         double_click()
         equal(ricestep_debug().state.focus_status, "active", "focus works after old walk migration")
         phase = 5
+    elseif phase == 5 then
+        boot({v = 1, rice = 6, desk = 1, desk_left = 123456})
+        equal(ricestep_debug().state.desk_status, "paused", "active reminder restores paused on boot")
+        flush()
+        equal(persisted.desk_left, 123456, "boot does not consume unknown offline time")
+        for index = 1, 4 do single_click() end
+        double_click(); double_click()
+        equal(ricestep_debug().state.desk_status, "active", "restored reminder explicitly resumed")
+        actual_tick(3456); flush()
+        equal(persisted.desk_left, 110000, "running remainder autosaves without unrelated actions")
+        boot(persisted); flush()
+        equal(ricestep_debug().state.desk_status, "paused", "second reboot still needs resume")
+        equal(ricestep_debug().state.desk_remaining_ms, 110000, "saved remaining time survives second boot")
+        phase = 6
+    elseif phase == 6 then
+        boot({v = 1, rice = 6, desk = 2, desk_left = 99}); flush()
+        equal(ricestep_debug().state.desk_status, "due", "due reminder remains due after boot")
+        equal(persisted.desk_left, 0, "due save is canonical")
+        for index = 1, 4 do single_click() end
+        double_click(); single_click(); double_click(); flush()
+        equal(persisted.desk, 3, "snoozed mode is persisted")
+        equal(persisted.desk_left, 290000, "snooze remaining time is persisted")
+        boot(persisted); flush()
+        equal(ricestep_debug().state.desk_status, "snooze_paused", "snooze also needs explicit resume after boot")
+        equal(ricestep_debug().state.desk_remaining_ms, 290000, "snooze does not count downtime")
+        phase = 7
+    elseif phase == 7 then
+        for index = 1, 4 do single_click() end
+        double_click(); double_click(); flush()
+        equal(persisted.desk, 3, "resuming keeps the short snooze mode")
+        equal(persisted.desk_left, 280000, "resuming snooze does not reset it to a full session")
+        single_click(); single_click(); double_click(); flush()
+        equal(persisted.desk, 0, "closing a reminder is saved")
+        boot(persisted)
+        equal(ricestep_debug().state.desk_status, "off", "closed reminder stays off after restart")
+        equal(ricestep_debug().state.rice, 6, "all reminder lifecycle actions leave food alone")
+        equal(ricestep_debug().state.total_steps, 0, "reminder reboot cannot invent steps")
+        phase = 8
     else actual_tick(dt_ms) end
 end

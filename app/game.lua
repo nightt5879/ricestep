@@ -13,6 +13,10 @@ function create_game(options)
     local timer_unit = integer(options.timer_rice_ms, 300000, 1000, 3600000)
     local step_unit = integer(options.steps_per_rice, 500, 1, 10000)
     local focus_duration = integer(options.focus_duration_ms, 1500000, 1000, 3600000)
+    local desk_interval = integer(options.desk_interval_ms, 1800000, 1000, 7200000)
+    local desk_snooze = integer(options.desk_snooze_ms, 300000, 1000, 3600000)
+    local DESK_OFF, DESK_ACTIVE, DESK_DUE, DESK_SNOOZED, DESK_PAUSED, DESK_SNOOZE_PAUSED = 0, 1, 2, 3, 4, 5
+    local desk_names = {"off", "active", "due", "snoozed", "paused", "snooze_paused"}
     local random = type(options.random) == "function" and options.random or math.random
     local MAX_RICE, MAX_WALK_MS, MAX_WALK_STEPS = 999, 86400000, 200000
     local state = {
@@ -23,6 +27,7 @@ function create_game(options)
         pending_item = 0, timer_carry = 0, step_carry = 0, decay_ms = 0,
         focus_status = "idle", focus_ms = 0, focus_id = 0, focus_claimed = 0, focus_count = 0,
         cook_count = 0, perfect_count = 0, last_meal = "",
+        desk = DESK_OFF, desk_left = desk_interval,
     }
     local bounds = {
         rice = {0, MAX_RICE}, satiety = {20, 100}, mood = {0, 100},
@@ -36,6 +41,7 @@ function create_game(options)
         focus_ms = {0, focus_duration}, focus_id = {0, 1000000000},
         focus_claimed = {0, 1000000000}, focus_count = {0, 1000000},
         cook_count = {0, 1000000}, perfect_count = {0, 1000000},
+        desk_left = {0, math.max(desk_interval, desk_snooze)},
     }
     local saved = options.saved
     if type(saved) == "table" and saved.v == 1 then
@@ -75,6 +81,17 @@ function create_game(options)
         if state.focus_status ~= "idle" and state.focus_status ~= "cancelled" and
             state.focus_claimed == state.focus_id then state.focus_status = "claimed" end
         if state.focus_status == "finished" and state.focus_ms < focus_duration then state.focus_status = "paused" end
+        -- Only an explicit desk session can remind. Reload never infers sitting
+        -- or elapsed time while the app was closed; active timers await resume.
+        if saved.desk == DESK_ACTIVE or saved.desk == DESK_PAUSED then
+            state.desk = DESK_PAUSED
+            state.desk_left = math.min(state.desk_left, desk_interval)
+        elseif saved.desk == DESK_SNOOZED or saved.desk == DESK_SNOOZE_PAUSED then
+            state.desk = DESK_SNOOZE_PAUSED
+            state.desk_left = math.min(state.desk_left, desk_snooze)
+        elseif saved.desk == DESK_DUE then
+            state.desk, state.desk_left = DESK_DUE, 0
+        else state.desk_left = desk_interval end
     end
 
     local game = {}
@@ -121,6 +138,8 @@ function create_game(options)
         data.timer_rice_ms, data.steps_per_rice = timer_unit, step_unit
         data.focus_duration_ms = focus_duration
         data.focus_remaining_ms = math.max(0, focus_duration - state.focus_ms)
+        data.desk_status, data.desk_remaining_ms = desk_names[state.desk + 1], state.desk_left
+        data.desk_interval_ms, data.desk_snooze_ms = desk_interval, desk_snooze
         data.cooking_status, data.cooking_quality = cooking_status, cooking_quality
         data.cooking_elapsed_ms, data.cooking_remaining_ms = cooking_ms, 10000 - cooking_ms
         data.cooking_position = cooking_position()
@@ -132,7 +151,8 @@ function create_game(options)
     end
 
     function game.export()
-        -- 30 scalar fields. Caller supplies TTL and respects storage's write rate.
+        -- Exactly 32 scalar fields; desk uses only its mode and remaining ms.
+        -- Caller supplies TTL and respects storage's write rate.
         return copy_state()
     end
 
@@ -184,6 +204,13 @@ function create_game(options)
         -- The caller rejects clock jumps; the rules also bound each accepted delta.
         local dt = integer(dt_ms, 0, 0, 5000)
         local observed = integer(observed_ms, dt, 0, 5000)
+        local desk_became_due = false
+        if state.desk == DESK_ACTIVE or state.desk == DESK_SNOOZED then
+            state.desk_left = math.max(0, state.desk_left - observed)
+            if state.desk_left == 0 then
+                state.desk, desk_became_due = DESK_DUE, true
+            end
+        end
         local changed_satiety = false
         state.decay_ms = state.decay_ms + observed
         if state.decay_ms >= 300000 then
@@ -208,7 +235,44 @@ function create_game(options)
                 return {kind = "cooking_finished", quality = cooking_quality}
             end
         end
+        if desk_became_due then return {kind = "desk_due"} end
         if changed_satiety then return {kind = "satiety_changed"} end
+    end
+
+    -- Manual desk reminder only. These operations never grant food, steps,
+    -- exercise credit, or infer presence from a camera/absence of movement.
+    function game.start_desk()
+        if state.desk ~= DESK_OFF then return false, "desk_in_progress" end
+        state.desk, state.desk_left = DESK_ACTIVE, desk_interval
+        return true
+    end
+    function game.pause_desk()
+        if state.desk == DESK_ACTIVE then state.desk = DESK_PAUSED
+        elseif state.desk == DESK_SNOOZED then state.desk = DESK_SNOOZE_PAUSED
+        else return false, "not_active" end
+        return true
+    end
+    function game.resume_desk()
+        if state.desk == DESK_PAUSED then state.desk = DESK_ACTIVE
+        elseif state.desk == DESK_SNOOZE_PAUSED then state.desk = DESK_SNOOZED
+        else return false, "not_paused" end
+        return true
+    end
+    function game.snooze_desk()
+        if state.desk ~= DESK_DUE then return false, "not_due" end
+        state.desk, state.desk_left = DESK_SNOOZED, desk_snooze
+        return true
+    end
+    function game.desk_break()
+        if state.desk == DESK_OFF then return false, "not_active" end
+        -- User explicitly acknowledges a break; feeding/cooking never calls this.
+        state.desk, state.desk_left = DESK_ACTIVE, desk_interval
+        return true
+    end
+    function game.stop_desk()
+        if state.desk == DESK_OFF then return false, "not_active" end
+        state.desk, state.desk_left = DESK_OFF, desk_interval
+        return true
     end
 
     function game.set_steps(session_total)

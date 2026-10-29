@@ -1,9 +1,11 @@
 -- Exercise the real single-button UI; short focus duration is test-only.
 local actual_start, actual_tick = on_start, on_tick
 local phase = 0
+local desk_rice = 0
 local original_factory = create_game
 function create_game(options)
     options.focus_duration_ms = 1000
+    options.desk_interval_ms, options.desk_snooze_ms = 3000, 1000
     local roll = 0
     options.random = function() roll = roll % 6 + 1; return roll end
     return original_factory(options)
@@ -105,10 +107,59 @@ function on_tick(dt_ms)
         for index = 1, 5 do single_click() end
         double_click()
         equal(ricestep_debug().page, "home", "leave collection with single button")
-        for index = 1, 3 do single_click() end
+        for index = 1, 4 do single_click() end
         double_click()
         equal(ricestep_debug().line, "上次饭晒黑了，这回盯紧", "kitchen remembers previous burnt rice")
         equal(ricestep_debug().state.total_steps, 0, "companion activities never invent walking steps")
         phase = 3
+    elseif phase == 3 then
+        single_click(); double_click()
+        equal(ricestep_debug().page, "home", "leave remembered kitchen")
+        single_click(); single_click(); double_click()
+        equal(ricestep_debug().home_selection, 5, "fifth home option preserves first four positions")
+        equal(ricestep_debug().page, "desk", "open manual rest reminder")
+        equal(ricestep_debug().state.desk_status, "off", "opening reminder does not start it")
+        double_click()
+        equal(ricestep_debug().state.desk_status, "active", "explicit confirmation starts reminder")
+        single_click(); double_click()
+        equal(ricestep_debug().state.desk_status, "paused", "pause reminder using actual menu")
+        local remaining = ricestep_debug().state.desk_remaining_ms
+        actual_tick(1000)
+        equal(ricestep_debug().state.desk_remaining_ms, remaining, "UI paused remainder freezes")
+        double_click()
+        for index = 1, 3 do single_click() end
+        double_click()
+        equal(ricestep_debug().page, "home", "running reminder can remain in background")
+        phase = 4
+    elseif phase == 4 then
+        single_click()
+        equal(ricestep_debug().home_selection, 1, "fifth menu wraps to feeding")
+        local remaining = ricestep_debug().state.desk_remaining_ms
+        double_click()
+        equal(ricestep_debug().state.desk_remaining_ms, remaining, "feed action does not acknowledge a break")
+        desk_rice = ricestep_debug().state.rice
+        actual_tick(2000)
+        equal(ricestep_debug().page, "home", "due reminder does not steal current screen")
+        equal(ricestep_debug().state.desk_status, "due", "background reminder reaches due")
+        equal(ricestep_debug().state.rice, desk_rice, "due reminder earns no rice")
+        for index = 1, 4 do single_click() end
+        double_click()
+        phase = 5
+    elseif phase == 5 then
+        single_click(); double_click()
+        equal(ricestep_debug().state.desk_status, "snoozed", "due screen offers snooze")
+        equal(ricestep_debug().state.desk_remaining_ms, 1000, "snooze is short test interval")
+        actual_tick(999)
+        equal(ricestep_debug().state.desk_status, "snoozed", "not due before snooze deadline")
+        actual_tick(1)
+        equal(ricestep_debug().state.desk_status, "due", "snooze expires exactly once")
+        double_click()
+        equal(ricestep_debug().state.desk_status, "active", "explicit break resets active reminder")
+        equal(ricestep_debug().state.desk_remaining_ms, 3000, "acknowledged break resets full interval")
+        single_click(); single_click(); double_click()
+        equal(ricestep_debug().state.desk_status, "off", "close reminder through menu")
+        equal(ricestep_debug().state.rice, desk_rice, "break/snooze/close never give food")
+        equal(ricestep_debug().state.total_steps, 0, "reminder UI never invents steps")
+        phase = 6
     else actual_tick(dt_ms) end
 end

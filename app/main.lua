@@ -44,10 +44,14 @@ local function headline(default)
     if save_error then return "进度暂未保存，稍后重试" end
     return default
 end
-local function header(title, state)
+local function header(title, state, compact)
     screen.begin(BG)
-    screen.text(title, 12, 10, INK)
-    screen.text("米饭 " .. state.rice .. "碗", 148, 10, BLUE)
+    if state.desk_status == "due" and page ~= "desk" then title = "休息时间到啦" end
+    if compact then screen.text(title .. "   米饭" .. state.rice .. "碗", 12, 10, INK)
+    else
+        screen.text(title, 12, 10, INK)
+        screen.text("米饭 " .. state.rice .. "碗", 148, 10, BLUE)
+    end
     screen.rect(12, 31, 216, 1, LIGHT)
 end
 local function actions(labels, selected)
@@ -92,6 +96,11 @@ local function focus_labels(state)
     if state.focus_status == "active" then return {"暂停", "结束", "回家"} end
     if state.focus_status == "paused" then return {"继续", "结束", "回家"} end
     return {state.focus_status == "claimed" and "再来" or "开始", "回家"}
+end
+local function desk_labels(state)
+    if state.desk_status == "off" then return {"开始", "回家"} end
+    if state.desk_status == "paused" or state.desk_status == "snooze_paused" then return {"继续", "关闭", "回家"} end
+    return {"歇过了", state.desk_status == "due" and "稍后" or "暂停", "关闭", "回家"}
 end
 local function draw_item(index, owned)
     local color = owned and GOLD or 0xBAC8CB
@@ -138,11 +147,15 @@ local function draw()
     if not game then return end
     local state = game.snapshot()
     if page == "home" then
-        header("肥鱼饭搭子", state)
+        -- One header text keeps five home buttons within the SDK's 8-text cap.
+        header("肥鱼饭搭子", state, true)
         screen.rect(12, 36, 216, 22, CARD)
-        local hints = {"我在等饭，没在发呆", "你认真忙，我认真等饭", meal_notes[state.last_meal] or "小锅开火，等一碗好饭", "今天又攒到一点小开心"}
+        local hints = {"我在等饭，没在发呆", "你认真忙，我认真等饭", meal_notes[state.last_meal] or "小锅开火，等一碗好饭", "今天又攒到一点小开心", "开启提醒，记得歇一会儿"}
         local hint = hints[home_selection]
-        if state.focus_status == "active" then hint = "我陪着你  " .. time_label(state.focus_remaining_ms)
+        if state.desk_status == "due" then hint = "去「休息」，起来活动一下"
+        elseif home_selection == 5 and state.desk_status ~= "off" then
+            hint = (state.desk_status == "paused" or state.desk_status == "snooze_paused") and "提醒已暂停，双击继续查看" or ("下次休息  " .. time_label(state.desk_remaining_ms))
+        elseif state.focus_status == "active" then hint = "我陪着你  " .. time_label(state.focus_remaining_ms)
         elseif state.focus_status == "paused" then hint = "歇一小会儿，再继续"
         elseif state.satiety >= 100 and home_selection == 1 then hint = "肚子饱饱的，陪你坐会儿"
         elseif home_selection == 1 and math.floor(uptime / 12000) % 2 == 1 then hint = "抬抬头，伸个懒腰吧" end
@@ -151,7 +164,19 @@ local function draw()
         local pose = home_selection == 3 and (state.last_meal == "burnt" and 6 or 5) or 1
         if state.focus_status == "active" or state.satiety >= 90 or uptime - last_interaction > 15000 then pose = 4 end
         character(pose, false)
-        actions({"喂饭", "专注", "煮饭", "收藏"}, home_selection)
+        actions({"喂饭", "专注", "煮饭", "收藏", "休息"}, home_selection)
+    elseif page == "desk" then
+        header("休息提醒", state, true)
+        local hints = {off = "手动开启，每30分钟提醒", active = "我陪着你，也记得活动哦",
+            due = "稍后：5分钟后再提醒", snoozed = "等你忙完，5分钟再提醒",
+            paused = "提醒已暂停，继续才计时", snooze_paused = "稍后提醒已暂停，可继续"}
+        centered(headline(hints[state.desk_status]), 40, INK)
+        character(state.desk_status == "due" and 5 or 4, true)
+        centered(state.desk_status == "due" and "起来伸个懒腰吧" or time_label(state.desk_remaining_ms), 146, INK)
+        local labels = desk_labels(state)
+        if #labels <= 3 then centered("手动计时，不识别坐姿", 166, MUTED) end
+        selection = math.min(selection, #labels)
+        actions(labels, selection)
     elseif page == "focus" then
         header("肥鱼陪你专注", state)
         local hint = "专注25分钟，饭和小惊喜"
@@ -237,7 +262,25 @@ local function choose()
         elseif home_selection == 3 then
             set_page("cook")
             if meal_notes[state.last_meal] then message(meal_notes[state.last_meal], 5000); say("remember_" .. state.last_meal) end
-        else set_page("bag") end
+        elseif home_selection == 4 then set_page("bag")
+        else set_page("desk") end
+    elseif page == "desk" then
+        local choice = desk_labels(state)[selection]
+        if choice == "回家" then set_page("home")
+        else
+            local ok
+            if choice == "开始" then ok = game.start_desk()
+            elseif choice == "继续" then ok = game.resume_desk()
+            elseif choice == "暂停" then ok = game.pause_desk()
+            elseif choice == "稍后" then ok = game.snooze_desk()
+            elseif choice == "关闭" then ok = game.stop_desk()
+            elseif choice == "歇过了" then ok = game.desk_break() end
+            if ok then
+                dirty, selection = true, 1
+                if choice == "歇过了" then message("好呀，再一起慢慢忙", 3000)
+                elseif choice == "稍后" then message("好，5分钟后再提醒", 3000) end
+            end
+        end
     elseif page == "focus" then
         local choice = focus_labels(state)[selection]
         if choice == "回家" then set_page("home")
@@ -263,8 +306,9 @@ local function choose()
     draw()
 end
 local function next_choice()
-    if page == "home" then home_selection = home_selection % 4 + 1
+    if page == "home" then home_selection = home_selection % 5 + 1
     elseif page == "focus" then selection = selection % #focus_labels(game.snapshot()) + 1
+    elseif page == "desk" then selection = selection % #desk_labels(game.snapshot()) + 1
     elseif page == "bag" then selection = selection % 6 + 1
     else selection = selection % 2 + 1 end
     draw()
@@ -319,7 +363,8 @@ function on_tick(dt_ms)
     last_clock = now
     local before = game.snapshot()
     local event = game.update(dt, observed)
-    if before.focus_status == "active" or (event and event.kind == "satiety_changed") then dirty = true end
+    if before.focus_status == "active" or before.desk_status == "active" or before.desk_status == "snoozed" or
+        (event and event.kind == "satiety_changed") then dirty = true end
     if event and event.kind == "focus_finished" then
         local ok, result = game.claim_focus()
         if ok then
