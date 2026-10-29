@@ -22,6 +22,8 @@ jobs:
         run: ./scripts/build.ps1
       - name: Check gameplay, voice, rendering and local services
         run: ./scripts/test.ps1
+      - name: Check native motion state machines with synthetic landmarks
+        run: ./scripts/test-motion.ps1 -Compiler clang
       - name: Upload application and rendered preview
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
