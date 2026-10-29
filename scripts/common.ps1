@@ -32,7 +32,7 @@ function Expand-ToolArchive {
             if (-not $target.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
                 throw "Archive entry is outside the tools directory: $($entry.FullName)"
             }
-            if ($entry.Name -eq '') {
+            if ($entry.Name -eq '' -or $entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {
                 $null = New-Item -ItemType Directory -Path $target -Force
                 continue
             }

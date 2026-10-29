@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "platform": "windows-x64",
+  "minimumPowerShell": "7.4",
+  "sdk": {
+    "repository": "Shinku-Chen/listenai_arcs_mini",
+    "commit": "c0a95bcf3e45c7bd783ba4e997df19c96ffaaf35",
+    "note": "Reviewed community snapshot; not independently matched to the stock Mini3 firmware."
+  },
+  "toolsDirectory": ".cache/native-listenai-tools",
+  "packages": [
+    {
+      "id": "listenai-tools",
+      "version": "v0.1.0",
+      "archive": ".cache/native-tool-download/listenai-tools-windows-v0.1.0.zip",
+      "url": "https://listenai-firmware-delivery.oss-cn-beijing.aliyuncs.com/ARCS/tools/dev-tools/windows-amd64/v0.1.0/listenai-tools-windows-v0.1.0.zip",
+      "bytes": 45467973,
+      "sha256": "12c75e85c076d286e9dfbf59ec573da140e43ba7c386d268ee1cbb7604d26696",
+      "requiredFiles": [
+        "listenai-tools/VERSION",
+        "listenai-tools/cmake/bin/cmake.exe",
+        "listenai-tools/ninja/ninja.exe",
+        "listenai-tools/kconfig/kconfig.py",
+        "listenai-tools/menuconfig/menuconfig.py"
+      ],
+      "validatedCMakeVersion": "3.29.0"
+    },
+    {
+      "id": "nuclei-gcc",
+      "version": "2025.10-slim",
+      "archive": ".cache/native-tool-download/nuclei_riscv_newlibc_prebuilt_win64_2025.10_slim.zip",
+      "url": "https://listenai-firmware-delivery.oss-cn-beijing.aliyuncs.com/ARCS/tools/toolchain/windows-amd64/nuclei_riscv_newlibc_prebuilt_win64_2025.10_slim.zip",
+      "bytes": 142152667,
+      "sha256": "0a365fff7d0c35a52c059dee4060bc7e9eb8a76f5c9e47278d7f5c60c0b7fb24",
+      "requiredFiles": [
+        "gcc/bin/riscv64-unknown-elf-gcc.exe",
+        "gcc/bin/riscv64-unknown-elf-g++.exe",
+        "gcc/bin/riscv64-unknown-elf-ar.exe",
+        "gcc/bin/riscv64-unknown-elf-objcopy.exe"
+      ],
+      "validatedGccVersion": "14.2.1"
+    }
+  ],
+  "lua": {
+    "version": "5.4.8",
+    "archive": ".cache/lua-5.4.8.tar.gz",
+    "url": "https://www.lua.org/ftp/lua-5.4.8.tar.gz",
+    "bytes": 374332,
+    "sha256": "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
+    "directory": ".cache/lua-5.4.8",
+    "archiveRoot": "lua-5.4.8",
+    "sourceDirectory": ".cache/lua-5.4.8/src"
+  },
+  "provenance": {
+    "verifiedOn": "2026-10-29",
+    "packages": "Official HTTPS URLs declared by the reviewed ARCS SDK env.ps1; archive hashes, ZIP CRC and entry paths checked locally.",
+    "versions": "GCC and CMake versions were run after archive verification; setup -CheckOnly does not execute downloaded tools."
+  }
+}

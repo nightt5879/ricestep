@@ -14,7 +14,7 @@ $records = @()
 foreach ($package in $packages) {
     $target = Join-Path $root $package.name
     $partial = "$target.partial"
-    & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 900 --output $partial $package.url
+    & curl.exe --http1.1 --fail --location --retry 2 --retry-all-errors --continue-at - --connect-timeout 20 --max-time 900 --output $partial $package.url
     if ($LASTEXITCODE -ne 0) { throw "Official tool download failed: $($package.name)" }
     $zip = [IO.Compression.ZipFile]::OpenRead($partial)
     try {

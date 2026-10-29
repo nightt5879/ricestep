@@ -1,10 +1,6 @@
 name: Fetch official native tools
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/native-tools.yml'
-      - 'scripts/fetch-native-tools.ps1'
 permissions:
   contents: read
 jobs:
