@@ -11,6 +11,7 @@
 #endif
 
 static SemaphoreHandle_t rice_camera_mutex;
+static StaticSemaphore_t rice_camera_mutex_storage;
 static bool rice_camera_mutex_creating, rice_camera_leased, rice_camera_poisoned;
 static bool rice_camera_attempted;
 
@@ -26,8 +27,8 @@ static bool rice_camera_lock(TickType_t timeout)
     }
     taskEXIT_CRITICAL();
     if (create) {
-        /* Allocation never occurs with interrupts masked. */
-        mutex = xSemaphoreCreateMutex();
+        /* Caller-owned storage avoids the SDK's fatal pvPortMalloc hook. */
+        mutex = xSemaphoreCreateMutexStatic(&rice_camera_mutex_storage);
         taskENTER_CRITICAL();
         rice_camera_mutex = mutex;
         rice_camera_mutex_creating = false;

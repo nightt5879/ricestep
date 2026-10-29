@@ -19,3 +19,13 @@ $bridgeBinary = Join-Path $output 'pose-camera-bridge.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Pose camera bridge compilation failed.' }
 & $bridgeBinary
 if ($LASTEXITCODE -ne 0) { throw 'Pose camera bridge lifecycle tests failed.' }
+$memoryBinary = Join-Path $output 'pose-memory.exe'
+& $compilerPath '-std=c11' '-Wall' '-Wextra' '-Werror' '-Wpedantic' '-O2' @includes (Join-Path $repo 'tests/native/pose_memory_test.c') '-o' $memoryBinary
+if ($LASTEXITCODE -ne 0) { throw 'Pose memory adapter compilation failed.' }
+& $memoryBinary
+if ($LASTEXITCODE -ne 0) { throw 'Pose memory adapter tests failed.' }
+$cameraMemoryBinary = Join-Path $output 'pose-camera-memory.exe'
+& $compilerPath '-std=c11' '-Wall' '-Wextra' '-Werror' '-Wpedantic' '-O2' @includes (Join-Path $repo 'tests/native/pose_camera_memory_test.c') '-o' $cameraMemoryBinary
+if ($LASTEXITCODE -ne 0) { throw 'Pose camera memory test compilation failed.' }
+& $cameraMemoryBinary
+if ($LASTEXITCODE -ne 0) { throw 'Pose camera allocation rollback tests failed.' }

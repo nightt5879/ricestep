@@ -1,6 +1,7 @@
 #include "rice_pose.h"
 #include "rice_pose_camera.h"
 #include "rice_pose_profile.h"
+#include "rice_pose_memory.h"
 #include "pose_engine.h"
 #include "pose_image.h"
 #include "pose_resources.h"
@@ -8,7 +9,6 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
-#include "sysheap.h"
 #include "mbedtls/version.h"
 #include "mbedtls/sha256.h"
 #include <string.h>
@@ -19,7 +19,20 @@ typedef struct {
     uint32_t session_id;
 } rice_pose_command;
 
+#if configSUPPORT_STATIC_ALLOCATION != 1
+#error "Pose worker requires FreeRTOS caller-owned task/queue storage"
+#endif
+typedef struct {
+    StaticTask_t task;
+    StaticQueue_t queue;
+    uint8_t queue_bytes[sizeof(rice_pose_command)];
+    _Alignas(16) StackType_t stack[4096];
+} rice_pose_worker_memory;
+
 static QueueHandle_t s_queue;
+/* Allocated only on the first explicit start; retained for the idle worker.
+ * Caller-owned RTOS objects avoid pvPortMalloc's fatal SDK failure hook. */
+static rice_pose_worker_memory *s_worker_memory;
 static uint64_t s_generation;
 static bool s_active, s_creating, s_cleanup_failed;
 static rice_pose_snapshot_t s_snapshot;
@@ -77,16 +90,9 @@ static void run_session(const rice_pose_command *command)
         failure = "model_invalid"; goto cleanup;
     }
     if (!current(command->generation)) goto cleanup;
-    arena = exram_malloc(POSE_ENGINE_BUFFER_ALIGNMENT, POSE_ENGINE_MIN_ARENA_BYTES);
-    context = exram_malloc(pose_engine_context_alignment(), pose_engine_context_bytes());
-    frame_bytes = exram_malloc(32, 320u * 240u * 2u);
-    if (!arena || !context || !frame_bytes) { failure = "out_of_memory"; goto cleanup; }
-    if (!current(command->generation)) goto cleanup;
-    if (pose_engine_prepare(context, pose_engine_context_bytes(), model.data,
-            model.bytes, arena, POSE_ENGINE_MIN_ARENA_BYTES, &engine) != PE_OK) {
-        failure = "engine_prepare_failed"; goto cleanup;
-    }
-    if (!current(command->generation)) goto cleanup;
+    /* Stock setup transiently allocates two VGA buffers before subsampling to
+     * QVGA. Complete that resize before reserving the 2 MiB inference arena.
+     * No frame/DMA stream starts until the later explicit capture call. */
     int camera_status = service_camera_pose_claim();
     if (camera_status) {
         failure = camera_status == RICE_CAMERA_QUARANTINED ? "camera_quarantined" : "camera_busy";
@@ -99,6 +105,17 @@ static void run_session(const rice_pose_command *command)
     if (service_camera_pose_get_framesize(&width, &height) != 0 || width != 320 || height != 240) {
         failure = "camera_dimensions"; goto cleanup;
     }
+    if (!current(command->generation)) goto cleanup;
+    arena = rice_pose_alloc(POSE_ENGINE_BUFFER_ALIGNMENT, POSE_ENGINE_MIN_ARENA_BYTES);
+    context = rice_pose_alloc(pose_engine_context_alignment(), pose_engine_context_bytes());
+    frame_bytes = rice_pose_alloc(32, 320u * 240u * 2u);
+    if (!arena || !context || !frame_bytes) { failure = "out_of_memory"; goto cleanup; }
+    if (!current(command->generation)) goto cleanup;
+    if (pose_engine_prepare(context, pose_engine_context_bytes(), model.data,
+            model.bytes, arena, POSE_ENGINE_MIN_ARENA_BYTES, &engine) != PE_OK) {
+        failure = "engine_prepare_failed"; goto cleanup;
+    }
+    if (!current(command->generation)) goto cleanup;
     if (!ps_start(&session, command->kind, command->session_id)) {
         failure = "session_invalid"; goto cleanup;
     }
@@ -169,9 +186,9 @@ cleanup:
         taskEXIT_CRITICAL();
     }
     if (engine) pose_engine_release(engine);
-    if (frame_bytes) exram_free(frame_bytes);
-    if (context) exram_free(context);
-    if (arena) exram_free(arena);
+    if (frame_bytes) rice_pose_free(frame_bytes);
+    if (context) rice_pose_free(context);
+    if (arena) rice_pose_free(arena);
     result.state = failure ? RICE_POSE_ERROR : RICE_POSE_IDLE;
     result.reason = failure ? failure : "stopped";
     result.have_frame = false;
@@ -221,13 +238,18 @@ bool rice_pose_start(ml_exercise_kind kind, uint32_t session_id)
     if (!queue) s_creating = true;
     taskEXIT_CRITICAL();
     if (!queue) {
-        queue = xQueueCreate(1, sizeof(command));
-        if (queue && xTaskCreate(pose_worker, "rice.pose", 4096, queue,
-                tskIDLE_PRIORITY + 1, NULL) != pdPASS) {
-            vQueueDelete(queue); queue = NULL;
+        rice_pose_worker_memory *memory = rice_pose_alloc(16, sizeof(*memory));
+        if (memory) {
+            queue = xQueueCreateStatic(1, sizeof(command), memory->queue_bytes, &memory->queue);
+            if (!queue || !xTaskCreateStatic(pose_worker, "rice.pose", 4096, queue,
+                    tskIDLE_PRIORITY + 1, memory->stack, &memory->task)) {
+                if (queue) vQueueDelete(queue);
+                rice_pose_free(memory); memory = NULL; queue = NULL;
+            }
         }
         taskENTER_CRITICAL();
         s_creating = false;
+        s_worker_memory = memory;
         s_queue = queue;
         if (!queue && command.generation == s_generation) {
             s_snapshot.state = RICE_POSE_ERROR;

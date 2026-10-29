@@ -48,7 +48,9 @@ function verifyRuntime(elfBytes, binary, config, manifest, commands) {
   }
   check(imageEnd === binary.length, 'Unexpected CP trailing data');
   const required = ['rice_pose_start', 'rice_pose_stop', 'rice_pose_set_active', 'rice_pose_snapshot', 'ps_start', 'ps_update',
-    'service_camera_pose_claim', 'service_camera_pose_release'];
+    'service_camera_pose_claim', 'service_camera_pose_release', 'rice_pose_alloc', 'rice_pose_free',
+    'rice_pose_camera_fb_alloc', 'rice_pose_camera_fb_free',
+    'rice_pose_camera_queue_create', 'rice_pose_camera_queue_delete'];
   for (const name of required) check(elf.symbols.some(s => s.name === name && s.sectionIndex !== 0 && s.type === 2 && s.size > 0), `Missing camera runtime function ${name}`);
   const worker = commands.filter(c => /standalone[\\/]rice_pose\.c$/.test(c.file));
   check(worker.length === 1, 'Missing worker compile command');

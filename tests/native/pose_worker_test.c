@@ -15,7 +15,7 @@ static struct {
     unsigned critical, queues, tasks, allocated, freed, live, hash, prepare, claim,
         init, capture, invoke, decode, release_camera, release_engine, observations;
     unsigned fail_alloc;
-    bool fail_queue, fail_task, fail_hash, fail_model, fail_prepare, fail_init,
+    bool fail_control, fail_queue, fail_task, fail_hash, fail_model, fail_prepare, fail_init,
         fail_capture, fail_input, fail_preprocess, fail_invoke, fail_decode, fail_release;
     int claim_status;
     uint16_t width;
@@ -24,6 +24,7 @@ static struct {
     uint32_t tick, capture_elapsed, inference_elapsed;
     void (*entry)(void *);
     void *argument;
+    void *control;
 } m;
 static jmp_buf blocked;
 static uint8_t model_byte;
@@ -39,13 +40,14 @@ static void event(enum trigger at)
 }
 void mock_enter(void) { ++m.critical; }
 void mock_exit(void) { CHECK(m.critical); --m.critical; }
-QueueHandle_t xQueueCreate(unsigned count, size_t bytes)
+QueueHandle_t xQueueCreateStatic(unsigned count, size_t bytes, uint8_t *storage, StaticQueue_t *control)
 {
-    CHECK(!m.critical && count == 1 && bytes <= 64); ++m.queues;
+    CHECK(!m.critical && count == 1 && bytes <= 64 && storage && control); ++m.queues;
     if (m.fail_queue) return NULL;
-    QueueHandle_t queue = calloc(1, sizeof(*queue)); CHECK(queue); queue->size = bytes; return queue;
+    CHECK(sizeof(struct mock_queue) <= sizeof(*control));
+    QueueHandle_t queue = (QueueHandle_t)control; memset(queue, 0, sizeof(*queue)); queue->size = bytes; return queue;
 }
-void vQueueDelete(QueueHandle_t queue) { CHECK(!m.critical); free(queue); }
+void vQueueDelete(QueueHandle_t queue) { CHECK(!m.critical && queue); }
 BaseType_t xQueueOverwrite(QueueHandle_t queue, const void *value)
 { CHECK(queue); memcpy(queue->data, value, queue->size); queue->pending = true; return pdPASS; }
 BaseType_t xQueueReceive(QueueHandle_t queue, void *out, TickType_t wait)
@@ -54,24 +56,36 @@ BaseType_t xQueueReceive(QueueHandle_t queue, void *out, TickType_t wait)
     if (!queue->pending) longjmp(blocked, 1);
     memcpy(out, queue->data, queue->size); queue->pending = false; return pdTRUE;
 }
-BaseType_t xTaskCreate(void (*entry)(void *), const char *name, unsigned stack,
-                       void *argument, unsigned priority, void *handle)
+TaskHandle_t xTaskCreateStatic(void (*entry)(void *), const char *name, unsigned depth,
+                               void *argument, unsigned priority, StackType_t *stack, StaticTask_t *task)
 {
-    (void)name; (void)handle; CHECK(!m.critical && stack >= 4096 && priority == tskIDLE_PRIORITY + 1);
+    (void)name; CHECK(!m.critical && depth >= 4096 && stack && task && priority == tskIDLE_PRIORITY + 1);
     ++m.tasks; event(CREATE);
-    if (m.fail_task) return 0;
-    m.entry = entry; m.argument = argument; return pdPASS;
+    if (m.fail_task) return NULL;
+    m.entry = entry; m.argument = argument; return task;
 }
 TickType_t xTaskGetTickCount(void) { return m.tick; }
 void vTaskDelay(TickType_t ticks)
 { CHECK(!m.critical && ticks > 0); m.tick += ticks; rice_pose_stop(); }
-void *exram_malloc(size_t alignment, size_t bytes)
+void *rice_pose_alloc(size_t alignment, size_t bytes)
 {
-    CHECK(!m.critical && alignment >= 16); ++m.allocated; event(ALLOCATE);
+    CHECK(!m.critical && alignment >= 16);
+    if (bytes == sizeof(rice_pose_worker_memory)) {
+        CHECK(!m.control);
+        if (m.fail_control) return NULL;
+        m.control = malloc(bytes); CHECK(m.control); return m.control;
+    }
+    CHECK(m.init == 1); /* VGA camera resize must precede the large arena. */
+    ++m.allocated; event(ALLOCATE);
     if (m.fail_alloc == m.allocated) return NULL;
     void *ptr = malloc(bytes); CHECK(ptr); ++m.live; return ptr;
 }
-void exram_free(void *ptr) { CHECK(!m.critical && ptr && m.live); --m.live; ++m.freed; free(ptr); }
+void rice_pose_free(void *ptr)
+{
+    CHECK(!m.critical && ptr);
+    if (ptr == m.control) { free(ptr); m.control = NULL; return; }
+    CHECK(m.live); --m.live; ++m.freed; free(ptr);
+}
 int mbedtls_sha256_ret(const unsigned char *data, size_t bytes, unsigned char out[32], int is224)
 { CHECK(data == &model_byte && bytes == 1 && is224 == 0); ++m.hash; memset(out, 0, 32); event(HASH); return m.fail_hash ? -1 : 0; }
 int mbedtls_sha256(const unsigned char *d, size_t n, unsigned char o[32], int i)
@@ -123,16 +137,17 @@ ps_result ps_update(ps_session *session, const pose_movenet_landmark p[17], cons
 }
 const char *ps_reason_string(ps_reason reason) { (void)reason; return "ok"; }
 int service_camera_pose_claim(void) { ++m.claim; event(CLAIM); return m.claim_status; }
-int service_camera_pose_init(void) { ++m.init; event(INIT); return m.fail_init ? -1 : 0; }
+int service_camera_pose_init(void) { CHECK(!m.allocated); ++m.init; event(INIT); return m.fail_init ? -1 : 0; }
 int service_camera_pose_get_framesize(uint16_t *w, uint16_t *h) { *w = m.width; *h = 240; return 0; }
 int service_camera_pose_capture(uint8_t *buffer, uint32_t bytes)
 { CHECK(buffer && bytes == 153600); ++m.capture; event(CAPTURE); m.tick += m.capture_elapsed; return m.fail_capture ? -1 : 0; }
-int service_camera_pose_release(void) { ++m.release_camera; CHECK(m.live == 3); return m.fail_release ? -1 : 0; }
+int service_camera_pose_release(void) { ++m.release_camera; CHECK(m.live <= 3); return m.fail_release ? -1 : 0; }
 
 static void reset(void)
 {
     CHECK(m.critical == 0 && m.live == 0);
-    if (s_queue) free(s_queue);
+    if (s_worker_memory) { CHECK(s_worker_memory == m.control); free(s_worker_memory); }
+    s_worker_memory = NULL;
     s_queue = NULL; s_generation = 0; s_active = s_creating = s_cleanup_failed = false;
     memset(&s_snapshot, 0, sizeof(s_snapshot)); memset(&m, 0, sizeof(m));
     m.width = 320; m.tick = 100; m.capture_elapsed = 80; m.inference_elapsed = 90;
@@ -157,8 +172,8 @@ int main(void)
     CHECK(m.allocated == 3 && m.freed == 3 && !snapshot().have_frame);
     reset(); m.fail_model = true; begin(); expect_error("model_invalid"); CHECK(!m.allocated && !m.claim);
     reset(); m.fail_hash = true; begin(); expect_error("model_invalid"); CHECK(m.hash == 1 && !m.claim);
-    for (unsigned i = 1; i <= 3; ++i) { reset(); m.fail_alloc = i; begin(); expect_error("out_of_memory"); CHECK(!m.claim && m.freed == 2); }
-    reset(); m.fail_prepare = true; begin(); expect_error("engine_prepare_failed"); CHECK(!m.claim && !m.release_engine);
+    for (unsigned i = 1; i <= 3; ++i) { reset(); m.fail_alloc = i; begin(); expect_error("out_of_memory"); CHECK(m.release_camera == 1 && m.freed == 2); }
+    reset(); m.fail_prepare = true; begin(); expect_error("engine_prepare_failed"); CHECK(m.release_camera == 1 && !m.release_engine);
     reset(); m.claim_status = RICE_CAMERA_BUSY; begin(); expect_error("camera_busy"); CHECK(!m.init && !m.release_camera);
     reset(); m.claim_status = RICE_CAMERA_QUARANTINED; begin(); expect_error("camera_quarantined");
     reset(); m.fail_init = true; begin(); expect_error("camera_init_failed"); CHECK(m.release_camera == 1 && !m.capture);
@@ -171,13 +186,17 @@ int main(void)
     for (int at = HASH; at <= OBSERVE; ++at) {
         reset(); m.cancel_at = (enum trigger)at; m.retire = (at % 2) != 0; begin(); pump();
         CHECK(snapshot().state == RICE_POSE_IDLE && snapshot().total_reps == 0 && !snapshot().have_frame);
-        CHECK(m.live == 0); if (at <= PREPARE) CHECK(!m.claim);
+        CHECK(m.live == 0); if (at == HASH) CHECK(!m.claim);
         if (at == CAPTURE) CHECK(!m.invoke); if (at == INVOKE) CHECK(!m.decode);
     }
     reset(); m.cancel_at = CREATE; rice_pose_set_active(true);
     CHECK(!rice_pose_start(ML_PUSHUP, 1)); CHECK(snapshot().state == RICE_POSE_IDLE); pump(); CHECK(!m.hash);
     reset(); m.fail_queue = true; rice_pose_set_active(true); CHECK(!rice_pose_start(ML_PUSHUP, 1)); CHECK(snapshot().state == RICE_POSE_ERROR);
+    CHECK(!m.control);
+    reset(); m.fail_control = true; rice_pose_set_active(true); CHECK(!rice_pose_start(ML_PUSHUP, 1));
+    CHECK(snapshot().state == RICE_POSE_ERROR && !m.queues && !m.tasks && !m.control);
     reset(); m.fail_task = true; rice_pose_set_active(true); CHECK(!rice_pose_start(ML_PUSHUP, 1)); CHECK(!s_queue);
+    CHECK(!m.control);
     reset(); begin(); rice_pose_stop(); pump(); CHECK(!m.hash && snapshot().state == RICE_POSE_IDLE);
     for (int at = CAPTURE; at <= INVOKE; ++at) {
         reset(); m.cancel_at = (enum trigger)at; m.fail_release = true; begin(); expect_error("camera_cleanup_failed");

@@ -21,8 +21,13 @@ static struct {
 struct mock_semaphore { bool held; };
 void mock_enter(void) { ++m.critical; }
 void mock_exit(void) { CHECK(m.critical); --m.critical; }
-SemaphoreHandle_t xSemaphoreCreateMutex(void)
-{ CHECK(!m.critical); ++m.mutex_created; return m.fail_mutex ? NULL : calloc(1, sizeof(struct mock_semaphore)); }
+SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *storage)
+{
+    CHECK(!m.critical && storage && sizeof(struct mock_semaphore) <= sizeof(*storage));
+    ++m.mutex_created; if (m.fail_mutex) return NULL;
+    SemaphoreHandle_t semaphore = (SemaphoreHandle_t)storage;
+    semaphore->held = false; return semaphore;
+}
 BaseType_t xSemaphoreTake(SemaphoreHandle_t mutex, TickType_t timeout)
 { (void)timeout; CHECK(!m.critical && mutex); if (mutex->held) return 0; mutex->held = true; return pdTRUE; }
 BaseType_t xSemaphoreGive(SemaphoreHandle_t mutex)
@@ -83,7 +88,7 @@ static int DVP_DisableClockout(void *device) { CHECK(device == &dvp); ++m.clocko
 static void reset(void)
 {
     CHECK(!m.critical);
-    if (rice_camera_mutex) { CHECK(!rice_camera_mutex->held); free(rice_camera_mutex); }
+    if (rice_camera_mutex) CHECK(!rice_camera_mutex->held);
     rice_camera_mutex = NULL;
     rice_camera_mutex_creating = rice_camera_leased = rice_camera_poisoned = rice_camera_attempted = false;
     memset(&m, 0, sizeof(m)); service_camera_context_reset(); camera.ready = dvp.ready = gpio.ready = true;

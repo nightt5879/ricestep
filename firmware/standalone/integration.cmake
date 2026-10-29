@@ -25,6 +25,8 @@ if(RICESTEP_POSE_RUNTIME)
     endif()
     target_link_libraries(app-miniapp PRIVATE ricestep_pose)
     target_sources(app-miniapp PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rice_pose.c
+                                      ${CMAKE_CURRENT_LIST_DIR}/rice_pose_memory.c
+                                      ${CMAKE_CURRENT_LIST_DIR}/rice_pose_camera_memory.c
                                       ${CMAKE_CURRENT_LIST_DIR}/rice_pose_profile.c)
     set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/rice_pose.c
         PROPERTIES COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off")

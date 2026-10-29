@@ -26,7 +26,7 @@ test('resident C payload preserves exact UTF-8 Lua and stays within source limit
 test('pinned SDK anchors preserve stock behavior outside standalone guards', { skip: !fs.existsSync(path.join(SDK, '.git')) }, () => {
   const read = name => cp.execFileSync('git', ['-C', SDK, 'show', `${SDK_COMMIT}:${name}`], {encoding:'utf8'});
   const result = buildPatches(read);
-  assert.equal(Object.keys(result).length, 14);
+  assert.equal(Object.keys(result).length, 15);
   assert.ok(result['apps/arcs-mini/miniapp/miniapp_runtime.c'].includes('&& !rice_storage_owns(vm->id)'));
   assert.ok(result['apps/arcs-mini/miniapp/miniapp_runtime.c'].includes('rice_lua_audio_open(L)'));
   assert.ok(result['apps/arcs-mini/miniapp/miniapp_storage.c'].includes('record->expires = now + ttl;'));
@@ -43,6 +43,17 @@ test('pinned SDK anchors preserve stock behavior outside standalone guards', { s
   const vm = runtime['apps/arcs-mini/miniapp/miniapp_runtime.c'];
   assert.equal(vm.match(/rice_pose_set_active\(false\)/g).length, 2);
   assert.ok(vm.includes('rice_pose_set_active(rice_storage_owns(candidate->id))'));
+  const cameraDriver = runtime['arcs-sdk/drivers/lisa_camera/lisa_camera.c'];
+  assert.ok(cameraDriver.includes('#ifdef CONFIG_RICESTEP_POSE\n#include "../../../apps/arcs-mini/standalone/rice_pose_camera_memory.h"'));
+  assert.ok(cameraDriver.includes('#define lisa_mem_align_alloc rice_pose_camera_fb_alloc'));
+  assert.ok(cameraDriver.includes('#define lisa_queue_create rice_pose_camera_queue_create'));
+  assert.ok(cameraDriver.includes('#define lisa_queue_delete rice_pose_camera_queue_delete\n#endif'));
+  const sourceDriver = read('arcs-sdk/drivers/lisa_camera/lisa_camera.c').replace(/\r\n/g, '\n');
+  const excerpt = sourceDriver.slice(sourceDriver.indexOf('static int lisa_camera_fb_reinit(camera_priv_t *priv);'), sourceDriver.indexOf('static void lisa_camera_release_runtime(camera_priv_t *priv)'));
+  const fixture = fs.readFileSync(path.join(ROOT, 'tests/native/fixtures/lisa_camera_fb_pinned.inc'), 'utf8').replace(/\r\n/g, '\n');
+  assert.equal(fixture.slice(fixture.indexOf('static int lisa_camera_fb_reinit(camera_priv_t *priv);')), excerpt);
+  assert.throws(() => buildPatches(name => name.endsWith('/lisa_camera.c') ? read(name).replace('lisa_mem_align_alloc(32, frame_size)', 'allocator_changed(32, frame_size)') : read(name)), /Pinned camera allocator call sites changed/);
+  assert.throws(() => buildPatches(name => name.endsWith('/lisa_camera.c') ? read(name).replace('#define MAX_BUF_NUM         5', '#define MAX_BUF_NUM         6') : read(name)), /Pinned camera driver allocation anchors changed/);
   assert.throws(() => buildPatches(name => name.endsWith('service_camera.c') ? read(name).replace('int service_camera_capture(', 'int capture_changed(') : read(name)), /Pinned camera source mismatch/);
   assert.throws(() => buildPatches(name => name.endsWith('miniapp_storage.c') ? read(name).replace('int miniapp_storage_load(', 'int incompatible_storage_load(') : read(name)), /pinned source anchor/);
 });
