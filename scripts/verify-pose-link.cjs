@@ -29,6 +29,21 @@ function verify(elfBytes, commands) {
         !flags.includes('-mabi=ilp32') || !flags.includes('-march=rv32imac_zba_zbb_zbc_zbs')) {
       throw new Error(`Wrong Mini3 math/ABI flags: ${entry.file}`);
     }
+    if (flags.filter(f => /^-[DU]NDEBUG(?:=.*)?$/.test(f)).at(-1) !== '-DNDEBUG') {
+      throw new Error(`Inference library needs consistent private release checks: ${entry.file}`);
+    }
+    if (/[\\/]kernels[\\/](?:conv|depthwise_conv)\.cc$/.test(entry.file) &&
+        flags.filter(f => /^-O(?:[0-3sgz]|fast)$/.test(f)).at(-1) !== '-O3') {
+      throw new Error(`Hot convolution kernel needs final -O3: ${entry.file}`);
+    }
+  }
+  // A PUBLIC NDEBUG would silently turn off assertions in the Lua/app target.
+  const app = commands.filter(c => /standalone[\\/]rice_(?:pose|standalone|audio)\.c$/.test(c.file));
+  for (const entry of app) {
+    const flags = entry.arguments || entry.command.match(/"[^"\r\n]*"|[^\s]+/g);
+    if (flags.some(f => /^-DNDEBUG(?:=.*)?$/.test(f))) {
+      throw new Error(`Inference NDEBUG leaked into application: ${entry.file}`);
+    }
   }
   return { scope: 'Mini3 ELF static linkage only; no runtime execution or hardware validation',
     elfSha256: crypto.createHash('sha256').update(elfBytes).digest('hex'),

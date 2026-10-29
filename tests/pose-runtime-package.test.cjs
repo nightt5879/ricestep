@@ -33,6 +33,12 @@ test('actual compiled runtime requires matching CP, config, layout and compiler 
   assert.throws(() => check(wrongLayout), /layout/);
   const badCommands = commands.map(c => /standalone[\\/]rice_pose\.c$/.test(c.file) ? {...c, command: c.command + ' -ffast-math'} : c);
   assert.throws(() => check(elf, binary, config, manifest, badCommands), /floating point/);
+  const unoptimized = commands.map(c => /[\\/]kernels[\\/]conv\.cc$/.test(c.file) ? {...c, command: c.command + ' -Os'} : c);
+  assert.throws(() => check(elf, binary, config, manifest, unoptimized), /final -O3/);
+  const mixedChecks = commands.map(c => /[\\/]kernels[\\/]conv\.cc$/.test(c.file) ? {...c, command: c.command + ' -UNDEBUG'} : c);
+  assert.throws(() => check(elf, binary, config, manifest, mixedChecks), /private release/);
+  const leakedChecks = commands.map(c => /standalone[\\/]rice_pose\.c$/.test(c.file) ? {...c, command: c.command + ' -DNDEBUG'} : c);
+  assert.throws(() => check(elf, binary, config, manifest, leakedChecks), /leaked into application/);
   const old = path.join(root, 'dist/native/pose-link-check/arcs-mini3-ricestep.elf');
   if (fs.existsSync(old)) assert.throws(() => check(fs.readFileSync(old)), /resource profile/);
 });

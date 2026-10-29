@@ -57,6 +57,11 @@ target_include_directories(ricestep_pose PUBLIC
 target_compile_features(ricestep_pose PUBLIC c_std_11 cxx_std_17)
 target_link_libraries(ricestep_pose PUBLIC ricestep_tflm)
 foreach(target ricestep_tflm ricestep_pose)
+    # The fixed model is SHA-verified by the worker and explicitly validated by
+    # pose_engine before allocation/invoke. Remove repeated upstream debug
+    # assertions consistently across these two libraries, without leaking
+    # NDEBUG to the SDK/application or disabling our explicit error checks.
+    target_compile_definitions(${target} PRIVATE NDEBUG)
     target_compile_options(${target} PRIVATE
         -Os -ffunction-sections -fdata-sections
         -fno-fast-math -ffp-contract=off
@@ -83,3 +88,9 @@ if(TARGET listenai_interface)
         -Wl,-u,pose_engine_arena_used_bytes
         -Wl,-u,rp_model_validate -Wl,-u,pi_prepare)
 endif()
+
+# The reference convolution kernels otherwise make checked multidimensional
+# Offset calls for every MAC under -Os. Keep exact arithmetic, but let these two
+# hot translation units inline/hoist indexing. Applied last, after SDK flags.
+set_property(SOURCE "${micro}/kernels/conv.cc" "${micro}/kernels/depthwise_conv.cc"
+    APPEND PROPERTY COMPILE_OPTIONS -O3)

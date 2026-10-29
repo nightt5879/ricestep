@@ -82,51 +82,121 @@ def model_counts(path, schema_path):
             "layers": rows}
 
 
-def scalar_loop(elf, objdump):
-    nm = objdump.with_name(objdump.name.replace("objdump", "nm"))
-    readelf = objdump.with_name(objdump.name.replace("objdump", "readelf"))
-    symbols = run(nm, "-S", "-C", elf)
-    matches = []
-    for line in symbols.splitlines():
-        if "reference_integer_ops::ConvPerChannel(" in line and "signed char const*" in line:
-            fields = line.split(None, 3)
-            matches.append((int(fields[0], 16), int(fields[1], 16), fields[3]))
-    if len(matches) != 1:
-        raise ValueError("Expected one linked int8 reference ConvPerChannel; re-audit this compiler/runtime")
-    start, size, name = matches[0]
-    disassembly = run(objdump, "-d", "-C", f"--start-address={start}", f"--stop-address={start + size}", elf)
+def parse_instructions(disassembly):
     instructions = []
     for line in disassembly.splitlines():
         match = re.match(r"\s*([0-9a-f]+):\s+([0-9a-f]+)\s+(\S+)\s*(.*)", line)
         if match:
             instructions.append({"address": int(match[1], 16), "machine_code": match[2],
                                  "mnemonic": match[3], "operands": match[4]})
+    return instructions
+
+
+def backedge_block(instructions, end):
+    jump = re.search(r",([0-9a-f]+)\s+<", end["operands"])
+    if not jump or int(jump[1], 16) >= end["address"]:
+        return []
+    target = int(jump[1], 16)
+    block = [i for i in instructions if target <= i["address"] <= end["address"]]
+    # Reject a target in the middle of an instruction or disassembly gaps.
+    if not block or block[0]["address"] != target:
+        return []
+    if any(a["address"] + len(a["machine_code"]) // 2 != b["address"] for a, b in zip(block, block[1:])):
+        return []
+    return block
+
+
+def checked_loop(instructions):
     candidates = []
+    audited_sequence = (
+        "add mv mv mv mv sw sw sw sw sw sw sw jal lw lw lw mv mv sw mv mv mv sw sw jal "
+        "lw lw lw add lb lw lw add lw lw add lb lw mul lw lw lw add addi blt").split()
     for end in instructions:
         if end["mnemonic"] != "blt":
             continue
-        jump = re.search(r",([0-9a-f]+)\s+<", end["operands"])
-        if not jump:
-            continue
-        target = int(jump[1], 16)
-        block = [i for i in instructions if target <= i["address"] <= end["address"]]
+        block = backedge_block(instructions, end)
         counts = collections.Counter(i["mnemonic"] for i in block)
         # Recognize the audited scalar channel loop, not any arbitrary backedge.
         # Exclude Offset callees from the lower bound. A different optimized
         # loop must be reviewed explicitly instead of reusing this count.
-        if (target < end["address"] and counts["mul"] == 1 and counts["lb"] == 2
+        if ([i["mnemonic"] for i in block] == audited_sequence and counts["mul"] == 1 and counts["lb"] == 2
                 and counts["jal"] == 2 and counts["blt"] == 1
                 and all(i["mnemonic"] != "jal" or "::Offset(" in i["operands"] for i in block)
                 and not any(i["mnemonic"].startswith("b") for i in block[:-1])
                 and not any(i["mnemonic"] in ("j", "jr", "ret", "jalr") for i in block)):
             candidates.append(block)
     if len(candidates) != 1:
-        raise ValueError("Scalar MAC loop changed; inspect ELF and update the audit, never assume 45 instructions")
-    block = candidates[0]
-    return {"function": name, "function_address": hex(start), "function_bytes": size,
-            "loop_start": hex(block[0]["address"]), "loop_end_inclusive": hex(block[-1]["address"]),
-            "direct_instructions_per_conv_mac": len(block),
-            "offset_callees_included": False, "instructions": block,
+        raise ValueError("Checked scalar MAC loop changed; inspect ELF, never assume 45 instructions")
+    return candidates
+
+
+def release_loop_shape(block):
+    # Audited O3/NDEBUG signed-int8 loop. Match the exact operation sequence AND
+    # register/spill data flow, not merely 'two loads plus multiply'. Both int8
+    # filter routes are inlined into ConvEval; a changed compiler must fail shut.
+    if [i["mnemonic"] for i in block] != [
+            "lb", "lb", "sw", "lw", "addi", "add", "lw", "addi", "mul", "lw", "add", "bne"]:
+        return False
+    operands = [i["operands"].split(" <", 1)[0].replace(" ", "").split(",") for i in block]
+    if [len(o) for o in operands] != [2,2,2,2,3,3,2,3,3,2,3,3]:
+        return False
+    weight, pixels = operands[0][0], operands[1][0]
+    wp = re.fullmatch(r"0\(([a-z][a-z0-9]*)\)", operands[0][1])
+    ip = re.fullmatch(r"0\(([a-z][a-z0-9]*)\)", operands[1][1])
+    if not wp or not ip or wp[1] == ip[1] or weight == pixels:
+        return False
+    temp, spill = operands[3][0], operands[2][1]
+    accumulator = operands[10][0]
+    return (operands[2][0] == weight and
+            re.fullmatch(r"-?\d+\(s0\)", spill) is not None and
+            all(re.fullmatch(r"-?\d+\(s0\)", operands[n][1]) for n in (3,6,9)) and
+            operands[4] == [wp[1], wp[1], "1"] and
+            operands[5] == [pixels, pixels, temp] and
+            operands[6] == [temp, spill] and
+            operands[7] == [ip[1], ip[1], "1"] and
+            operands[8] == [pixels, pixels, temp] and operands[9][0] == temp and
+            operands[10] == [accumulator, accumulator, pixels] and
+            set(operands[11][:2]) == {wp[1], temp} and
+            len({wp[1], ip[1], pixels, temp, accumulator}) == 5)
+
+
+def release_loops(instructions):
+    candidates = [block for end in instructions if end["mnemonic"] == "bne"
+                  if release_loop_shape(block := backedge_block(instructions, end))]
+    if len(candidates) != 2:
+        raise ValueError("Release ConvEval MAC loops changed; expected two audited 12-instruction int8 routes")
+    return candidates
+
+
+def scalar_loop(elf, objdump):
+    header = elf.read_bytes()[:20]
+    if len(header) != 20 or header[:6] != b"\x7fELF\x01\x01" or int.from_bytes(header[18:20], "little") != 243:
+        raise ValueError("Expected ELF32 little-endian RISC-V image")
+    nm = objdump.with_name(objdump.name.replace("objdump", "nm"))
+    readelf = objdump.with_name(objdump.name.replace("objdump", "readelf"))
+    symbols = []
+    for line in run(nm, "-S", "-C", elf).splitlines():
+        fields = line.split(None, 3)
+        if len(fields) == 4 and re.fullmatch(r"[0-9a-fA-F]+", fields[0]) and re.fullmatch(r"[0-9a-fA-F]+", fields[1]):
+            symbols.append((int(fields[0], 16), int(fields[1], 16), fields[3]))
+    checked = [s for s in symbols if "reference_integer_ops::ConvPerChannel(" in s[2] and "signed char const*" in s[2]]
+    if len(checked) == 1:
+        selected, profile, finder = checked[0], "os-debug-checked-45", checked_loop
+    elif not checked:
+        inlined = [s for s in symbols if "micro::(anonymous namespace)::ConvEval(" in s[2]]
+        if len(inlined) != 1:
+            raise ValueError("Expected one linked ConvEval; re-audit this compiler/runtime")
+        selected, profile, finder = inlined[0], "o3-release-inlined-12", release_loops
+    else:
+        raise ValueError("Ambiguous int8 convolution implementation; re-audit this compiler/runtime")
+    start, size, name = selected
+    disassembly = run(objdump, "-d", "-C", f"--start-address={start}", f"--stop-address={start + size}", elf)
+    blocks = finder(parse_instructions(disassembly))
+    loop_reports = [{"loop_start": hex(b[0]["address"]), "loop_end_inclusive": hex(b[-1]["address"]),
+                     "direct_instructions_per_conv_mac": len(b), "instructions": b} for b in blocks]
+    return {"profile": profile, "function": name, "function_address": hex(start), "function_bytes": size,
+            **loop_reports[0], "audited_routes": loop_reports,
+            "offset_callees_included": False, "offset_calls_per_mac": 2 if checked else 0,
             "riscv_attributes": run(readelf, "-A", elf).strip()}
 
 
@@ -158,6 +228,26 @@ def source_evidence(sdk):
     return result
 
 
+def check_compile_profile(command, profile):
+    # Last compiler option wins. These are evidence gates for the two audited
+    # configurations, not an attempt to infer arbitrary optimizer behavior.
+    words = command.split()
+    if any(flag not in words for flag in (
+            "-mtune=nuclei-300-series", "-march=rv32imac_zba_zbb_zbc_zbs", "-mabi=ilp32")):
+        raise ValueError("Target CPU/ISA/ABI changed; re-audit the issue-width assumption")
+    optimization = [w for w in words if re.fullmatch(r"-O(?:[0-3sgz]|fast)", w)]
+    debug = [w for w in words if w == "-UNDEBUG" or re.fullmatch(r"-DNDEBUG(?:=\S+)?", w)]
+    fast_math = [w for w in words if w in ("-ffast-math", "-fno-fast-math")]
+    contraction = [w for w in words if w.startswith("-ffp-contract=")]
+    expected_opt = "-O3" if profile == "o3-release-inlined-12" else "-Os"
+    has_ndebug = bool(debug) and debug[-1].startswith("-D")
+    if (not optimization or optimization[-1] != expected_opt or
+            has_ndebug != (profile == "o3-release-inlined-12") or
+            not fast_math or fast_math[-1] != "-fno-fast-math" or
+            not contraction or contraction[-1] != "-ffp-contract=off"):
+        raise ValueError("Compile options do not match the recognized loop profile; re-audit this build")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, default=ROOT / ".cache/pose-probe/movenet-heads-host-probe.tflite")
@@ -175,8 +265,7 @@ def main():
     if len(conv_commands) != 1:
         raise ValueError("Expected one reference conv.cc compile command")
     command = conv_commands[0]["command"]
-    if "-mtune=nuclei-300-series" not in command or "-march=rv32imac_zba_zbb_zbc_zbs" not in command:
-        raise ValueError("Target CPU/ISA changed; re-audit the issue-width assumption")
+    check_compile_profile(command, loop["profile"])
     direct_count = loop["direct_instructions_per_conv_mac"] * model["by_kind"]["CONV_2D"]["nonpadding_macs"]
     report = {"scope": "Static conditional lower bounds only; no board measurement, FPS or pose accuracy claim",
               "model": model, "elf_sha256": sha256(args.elf), "scalar_conv_loop": loop,
@@ -189,7 +278,7 @@ def main():
               "budget": {"gate_ms": 400, "ideal_one_mac_per_cycle_ms": model["nonpadding_macs"] / CPU_HZ_CEILING * 1000,
                          "ordinary_conv_direct_instructions": direct_count,
                          "ordinary_conv_only_lower_ms_at_dual_issue": direct_count / (CPU_HZ_CEILING * GENEROUS_ISSUE_WIDTH) * 1000,
-                         "excluded": ["Offset callee instructions", "outer convolution loops", "depthwise convolution",
+                         "excluded": (["Offset callee instructions"] if loop["offset_calls_per_mac"] else []) + ["outer convolution loops", "depthwise convolution",
                                       "requantization", "other operators", "camera capture", "image preparation", "decode",
                                       "instruction/data stalls", "interrupts", "other tasks"]}}
     encoded = json.dumps(report, indent=2) + "\n"
@@ -198,6 +287,7 @@ def main():
         args.output.write_text(encoded, encoding="utf-8")
         print(json.dumps({"report": str(args.output), "model_sha256": model["sha256"],
                           "elf_sha256": report["elf_sha256"], "nonpadding_macs": model["nonpadding_macs"],
+                          "loop_profile": loop["profile"],
                           "direct_instructions_per_mac": loop["direct_instructions_per_conv_mac"],
                           "budget": report["budget"]}, indent=2))
     else:
