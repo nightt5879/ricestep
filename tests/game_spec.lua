@@ -317,7 +317,8 @@ function on_start()
 
     -- Stress the full persisted schema with maximum numeric widths, not only a
     -- fresh save. Keep exactly two added scalar fields under the runtime budget.
-    local largest = cooking.export()
+    local largest = cooking.snapshot()
+    largest.v = 1
     for key, value in pairs(largest) do
         if type(value) == "number" and key ~= "v" then largest[key] = 1000000000000 end
     end
@@ -331,7 +332,8 @@ function on_start()
         assert(type(key) == "string" and #key <= 32)
         assert(type(value) ~= "table")
     end
-    eq(field_count, 32, "storage uses exactly 32 scalar fields")
+    eq(field_count, 26, "v2 storage uses 26 scalar fields")
+    assert(#exported.walk <= 256, "packed legacy entitlement string fits SDK limit")
     assert(#json.encode(exported) <= 1024, "storage byte limit")
     eq(exported.desk_status, nil, "derived reminder UI fields are not persisted")
     screen.begin(0x163A32)

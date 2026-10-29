@@ -140,7 +140,7 @@ function on_tick(dt_ms)
         clock = {monotonic = function() return monotonic end, now = function() return fake_now end}
         actual_start()
         for index = 1, 4 do on_button_click("function"); actual_tick(350) end
-        double_click(); double_click()
+        double_click(); double_click(); double_click()
         equal(ricestep_debug().state.desk_status, "active", "manual reminder starts through clock-enabled UI")
         actual_tick(200)
         equal(ricestep_debug().state.desk_remaining_ms, 10000, "duplicate clock sample cannot consume reminder time")

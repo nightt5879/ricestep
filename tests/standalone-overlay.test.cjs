@@ -26,7 +26,7 @@ test('resident C payload preserves exact UTF-8 Lua and stays within source limit
 test('pinned SDK anchors preserve stock behavior outside standalone guards', { skip: !fs.existsSync(path.join(SDK, '.git')) }, () => {
   const read = name => cp.execFileSync('git', ['-C', SDK, 'show', `${SDK_COMMIT}:${name}`], {encoding:'utf8'});
   const result = buildPatches(read);
-  assert.equal(Object.keys(result).length, 11);
+  assert.equal(Object.keys(result).length, 14);
   assert.ok(result['apps/arcs-mini/miniapp/miniapp_runtime.c'].includes('&& !rice_storage_owns(vm->id)'));
   assert.ok(result['apps/arcs-mini/miniapp/miniapp_runtime.c'].includes('rice_lua_audio_open(L)'));
   assert.ok(result['apps/arcs-mini/miniapp/miniapp_storage.c'].includes('record->expires = now + ttl;'));
@@ -35,5 +35,14 @@ test('pinned SDK anchors preserve stock behavior outside standalone guards', { s
   assert.ok(result['apps/arcs-mini/arcs_mini3.conf'].includes('CONFIG_ACOMP_WAKEUP=y'));
   assert.ok(result['src/system/platform.c'].includes('#if CONFIG_ACOMP && !defined(CONFIG_RICESTEP_STANDALONE)'));
   assert.ok(result['src/system/platform.c'].includes('app_wakeup_init(NULL)'));
+  assert.ok(result['apps/arcs-mini/arcs_mini3.conf'].includes('CONFIG_RICESTEP_POSE=n'));
+  assert.ok(result['apps/arcs-mini/CMakeLists.txt'].includes('if(NOT CONFIG_RICESTEP_POSE)\nadd_custom_target('));
+  assert.ok(result['apps-ui/assets/fonts/font_romfs.c'].includes('#define RESPAK_BIN_ADDR RICE_POSE_FONTS_ADDRESS'));
+  const runtime = buildPatches(read, { poseRuntime: true });
+  assert.ok(runtime['apps/arcs-mini/arcs_mini3.conf'].includes('CONFIG_RICESTEP_POSE=y'));
+  const vm = runtime['apps/arcs-mini/miniapp/miniapp_runtime.c'];
+  assert.equal(vm.match(/rice_pose_set_active\(false\)/g).length, 2);
+  assert.ok(vm.includes('rice_pose_set_active(rice_storage_owns(candidate->id))'));
+  assert.throws(() => buildPatches(name => name.endsWith('service_camera.c') ? read(name).replace('int service_camera_capture(', 'int capture_changed(') : read(name)), /Pinned camera source mismatch/);
   assert.throws(() => buildPatches(name => name.endsWith('miniapp_storage.c') ? read(name).replace('int miniapp_storage_load(', 'int incompatible_storage_load(') : read(name)), /pinned source anchor/);
 });

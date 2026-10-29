@@ -28,6 +28,8 @@ jobs:
           ./scripts/test-pose-image.ps1 -Compiler clang
           ./scripts/test-pose-decode.ps1 -Compiler clang
           ./scripts/test-pose-resources.ps1 -Compiler clang
+          ./scripts/test-pose-session.ps1 -Compiler clang
+          ./scripts/test-pose-worker.ps1 -Compiler clang
       - name: Check offline voice assets and standalone persistence
         run: |
           node --test --test-reporter=dot tests/native-voice-pack.test.cjs tests/standalone-overlay.test.cjs tests/native-image.test.cjs tests/pose-resources.test.cjs tests/setup-pose-source.test.cjs

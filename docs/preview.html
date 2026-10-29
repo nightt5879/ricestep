@@ -10,7 +10,7 @@
 <body><main>
 <div class="eyebrow">肥鱼饭搭子 / 2026.10.27</div>
 <h1>你认真忙，我认真等饭。</h1>
-<p class="muted">外观与声音预览。使用板上同一套像素素材和配音，可离线打开；这里的切换不会操作开发板。</p>
+<p class="muted">使用同一套像素素材和配音，可离线打开。切换表情保持安静；只有手动按播放器或“试听”才会发声。这里不会操作开发板。</p>
 <section class="preview" aria-label="角色与声音预览">
  <div class="stage"><div class="eyebrow" id="scene-name">等开饭</div><canvas id="pet" width="240" height="240" role="img" aria-label="肥鱼抱着期待等开饭">肥鱼像素角色</canvas><p class="caption" id="caption"></p></div>
  <div><h2>看看她的小反应</h2><div class="scenes" id="scenes"></div>
@@ -18,7 +18,7 @@
  <details class="catalog"><summary>全部14句配音</summary><label for="voice-list">选择台词</label><select id="voice-list"></select><button type="button" id="play-selected">试听这句</button></details>
  </div>
 </section>
-<section class="future"><h2>下一阶段的想法：你做运动，她赚口粮</h2><p>摄像头识别完整动作 → 赚米饭 → 喂肥鱼。先验证俯卧撑，再研究波比跳。</p><p class="muted">这是后续构想，目前没有启用摄像头或实现运动识别。今晚先看已完成的表情、声音、煮饭和上一锅记忆。</p></section>
+<section class="future"><h2>你做运动，她赚口粮</h2><p>新版加入休息提醒和运动页面：俯卧撑／深蹲，每5次完整动作赚1碗米饭。</p><p class="muted">摄像头推理、动作计数和奖励已接入候选固件，正在做离线验收；尚未上板验证识别速度和准确率。本页只展示外观，不采集画面、不模拟真实运动成绩。</p><p><a href="camera-exercise.md">查看摄像头版本的实现与验证边界</a></p></section>
 <footer>这是外观与声音展览，不是完整小游戏模拟器；不连接设备、不采集影像。正式玩法仍在开发板与官方模拟器中。</footer>
 </main>
 <script>
@@ -62,7 +62,7 @@ function selectScene(index,play){
  draw(s.pose);audioClip(s.clip,play);
  if(s.eat&&!matchMedia('(prefers-reduced-motion: reduce)').matches){timers.push(setTimeout(()=>draw(2),700),setTimeout(()=>draw(4),4200))}
 }
-scenes.forEach((s,i)=>{const b=document.createElement('button');b.type='button';b.textContent=s.name;b.setAttribute('aria-pressed','false');b.onclick=()=>selectScene(i,true);document.getElementById('scenes').append(b)});
+scenes.forEach((s,i)=>{const b=document.createElement('button');b.type='button';b.textContent=s.name;b.setAttribute('aria-pressed','false');b.onclick=()=>selectScene(i,false);document.getElementById('scenes').append(b)});
 for(const [id,clip]of Object.entries(DATA.clips)){const option=document.createElement('option');option.value=id;option.textContent=clip.text;document.getElementById('voice-list').append(option)}
 document.getElementById('play-selected').onclick=()=>audioClip(document.getElementById('voice-list').value,true);
 player.addEventListener('error',()=>{status.textContent='当前浏览器未能播放，可换用 Chrome、Edge 或 Safari 打开。'});

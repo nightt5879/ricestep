@@ -15,7 +15,20 @@ listenai_add_linker_section(
 )
 
 include(${CMAKE_CURRENT_LIST_DIR}/pose-config.cmake)
-if(RICESTEP_POSE_LINK_CHECK)
+if(RICESTEP_POSE_LINK_CHECK OR RICESTEP_POSE_RUNTIME)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/pose_runtime
                      ${CMAKE_CURRENT_BINARY_DIR}/pose_runtime)
+endif()
+if(RICESTEP_POSE_RUNTIME)
+    if(NOT CONFIG_RICESTEP_POSE)
+        message(FATAL_ERROR "Pose runtime requires its matching Kconfig/resource profile")
+    endif()
+    target_link_libraries(app-miniapp PRIVATE ricestep_pose)
+    target_sources(app-miniapp PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rice_pose.c
+                                      ${CMAKE_CURRENT_LIST_DIR}/rice_pose_profile.c)
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/rice_pose.c
+        PROPERTIES COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off")
+    target_link_options(app-miniapp INTERFACE -Wl,-u,rice_pose_profile)
+elseif(CONFIG_RICESTEP_POSE)
+    message(FATAL_ERROR "Pose Kconfig requires the explicit runtime overlay")
 endif()

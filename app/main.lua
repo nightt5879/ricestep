@@ -6,6 +6,8 @@ local toast, toast_until, animation_pose, animation_until = "", 0, 1, 0
 local dirty, last_save, save_error, voice = false, 0, nil, nil
 local cook_armed_at, input_after, cook_result, last_clock = 0, 0, nil, nil
 local last_interaction, greeted = 0, false
+local exercise_kind, exercise_reps, motion_elapsed = "pushup", 0, 0
+local motion_view = {state = "unavailable"}
 local BG, INK, MUTED, BLUE = 0xFFF5E5, 0x233D61, 0x6F8395, 0x399AB2
 local CARD, LIGHT, GOLD, WHITE = 0xFFFBF3, 0xDCEFF0, 0xD7A749, 0xFFFFFF
 local item_names = {"荷叶帽", "小贝壳", "鹅卵石", "晴天花", "云朵邮票", "米粒勋章"}
@@ -44,9 +46,68 @@ local function headline(default)
     if save_error then return "进度暂未保存，稍后重试" end
     return default
 end
+local function read_motion()
+    if type(motion) ~= "table" or type(motion.start) ~= "function" or
+        type(motion.stop) ~= "function" or type(motion.status) ~= "function" then return {state = "unavailable"} end
+    local value = motion.status()
+    local states = {unavailable = true, idle = true, starting = true, running = true, stopping = true, error = true}
+    if type(value) ~= "table" or not states[value.state] then return {state = "error", reason = "backend_error"} end
+    return value
+end
+local function stop_motion()
+    if type(motion) == "table" and type(motion.stop) == "function" then motion.stop() end
+    if game then game.stop_exercise() end
+end
+local function poll_motion()
+    local value, state = read_motion(), game.snapshot()
+    if state.exercise_active then
+        if value.state == "running" or value.state == "starting" then
+            if value.session_id ~= state.exercise_id or value.kind ~= state.exercise_kind then
+                motion_view = {state = "starting"}
+                return
+            end
+            local changed = game.accept_exercise(value)
+            if changed then dirty = true end
+            exercise_reps = game.snapshot().exercise_reps
+        else
+            -- Ended/error sessions stay retired; a later status cannot restart them.
+            stop_motion()
+        end
+    end
+    motion_view = value
+end
+local function exercise_labels()
+    if motion_view.state == "unavailable" or motion_view.reason == "camera_cleanup_failed" or
+        motion_view.reason == "camera_quarantined" then return {"返回"} end
+    if game.snapshot().exercise_active then return {"停止", "返回"} end
+    if motion_view.state == "stopping" or motion_view.state == "starting" or motion_view.state == "running" then return {"返回"} end
+    return {"开始", "换项", "返回"}
+end
+local function draw_pose()
+    screen.rect(63, 58, 114, 86, LIGHT)
+    local state = game.snapshot()
+    local aspect = motion_view.image_aspect
+    if not state.exercise_active or motion_view.state ~= "running" or
+        motion_view.session_id ~= state.exercise_id or motion_view.kind ~= state.exercise_kind or
+        type(motion_view.points) ~= "table" or type(aspect) ~= "number" or
+        aspect ~= aspect or aspect <= 0 or aspect == math.huge then return end
+    local w, h = 112, 84
+    if aspect > w / h then h = math.floor(w / aspect) else w = math.floor(h * aspect) end
+    if w < 3 or h < 3 then return end
+    local x, y = 64 + math.floor((112 - w) / 2), 59 + math.floor((84 - h) / 2)
+    screen.rect(x, y, w, h, CARD)
+    for index = 1, 17 do
+        local p = motion_view.points[index]
+        if type(p) == "table" and type(p.x) == "number" and type(p.y) == "number" and
+            type(p.confidence) == "number" and p.x >= 0 and p.x <= 1 and p.y >= 0 and p.y <= 1 and
+            p.confidence >= 0.5 and p.confidence <= 1 then
+            screen.rect(x + math.floor(p.x * (w - 3)), y + math.floor(p.y * (h - 3)), 3, 3, BLUE)
+        end
+    end
+end
 local function header(title, state, compact)
     screen.begin(BG)
-    if state.desk_status == "due" and page ~= "desk" then title = "休息时间到啦" end
+    if state.desk_status == "due" and page ~= "desk" and page ~= "exercise" then title = "休息时间到啦" end
     if compact then screen.text(title .. "   米饭" .. state.rice .. "碗", 12, 10, INK)
     else
         screen.text(title, 12, 10, INK)
@@ -165,6 +226,37 @@ local function draw()
         if state.focus_status == "active" or state.satiety >= 90 or uptime - last_interaction > 15000 then pose = 4 end
         character(pose, false)
         actions({"喂饭", "专注", "煮饭", "收藏", "休息"}, home_selection)
+    elseif page == "rest" then
+        header("一起活动一下", state)
+        centered("提醒歇会儿，或动一动", 40, INK)
+        character(1, true)
+        centered("运动仅在手动开始后取景", 155, MUTED)
+        actions({"提醒", "运动", "回家"}, selection)
+    elseif page == "exercise" then
+        header(exercise_kind == "pushup" and "俯卧撑赚米饭" or "深蹲赚米饭", state, true)
+        local hints = {unavailable = "当前固件未开放摄像头", idle = "侧身全身入镜，再开始",
+            starting = "正在准备摄像头和模型", running = "完整做动作，肥鱼帮你数",
+            stopping = "正在关闭摄像头", error = "识别暂不可用，请重试"}
+        local reasons = {low_confidence = "看不清身体，请调整站位", frame_gap = "等待新的画面", bad_geometry = "全身入镜，保持合适距离",
+            person_changed = "请保持同一人完整入镜", busy = "上一轮正在结束，请稍候",
+            waiting_for_frame = "等待身体完整进入画面", too_slow = "识别太慢，暂不计数", insufficient_sampling = "采样不足，暂不计数",
+            continuity_lost = "画面中断，请重新站好", discontinuity = "画面中断，请重新站好",
+            duplicate_frame = "等待新画面，不重复计数", out_of_order = "画面顺序异常，暂不计数",
+            invalid_time = "时间数据异常，暂不计数", invalid_transform = "画面尺寸异常，暂不计数",
+            invalid_argument = "识别数据异常，暂不计数", motion_rejected = "动作未完整，请重新准备",
+            continuity_token_exhausted = "请停止后重新开始", not_started = "等待手动开始",
+            camera_cleanup_failed = "相机关闭失败，请断电", camera_quarantined = "相机异常，请重启设备"}
+        local reason_hint = reasons[motion_view.reason]
+        if motion_view.state == "running" and motion_view.reason and motion_view.reason ~= "ok" and not reason_hint then
+            reason_hint = "识别状态异常，暂不计数"
+        end
+        centered(reason_hint or headline(hints[motion_view.state]), 40, INK)
+        draw_pose()
+        centered("本次已完成 " .. exercise_reps .. " 次", 147, INK)
+        centered("每5次+1碗，只认完整动作", 167, MUTED)
+        local labels = exercise_labels()
+        selection = math.min(selection, #labels)
+        actions(labels, selection)
     elseif page == "desk" then
         header("休息提醒", state, true)
         local hints = {off = "手动开启，每30分钟提醒", active = "我陪着你，也记得活动哦",
@@ -227,7 +319,10 @@ local function draw()
     end
     screen.present()
 end
-local function set_page(next_page) page, selection, click_at = next_page, 1, nil end
+local function set_page(next_page)
+    if page == "exercise" and next_page ~= "exercise" then stop_motion() end
+    page, selection, click_at = next_page, 1, nil
+end
 local function error_message(reason)
     local messages = {no_rice = "先专注或煮饭，攒一碗饭", full = "肚子饱饱的，晚点再吃",
         focus_in_progress = "先暂停专注，再来做饭", cooking_in_progress = "先把这锅米饭做好吧",
@@ -263,7 +358,35 @@ local function choose()
             set_page("cook")
             if meal_notes[state.last_meal] then message(meal_notes[state.last_meal], 5000); say("remember_" .. state.last_meal) end
         elseif home_selection == 4 then set_page("bag")
-        else set_page("desk") end
+        else set_page("rest") end
+    elseif page == "rest" then
+        if selection == 1 then set_page("desk")
+        elseif selection == 2 then
+            exercise_reps, motion_elapsed = 0, 0
+            motion_view = read_motion()
+            set_page("exercise")
+        else set_page("home") end
+    elseif page == "exercise" then
+        local choice = exercise_labels()[selection]
+        if choice == "返回" then set_page("rest")
+        elseif choice == "换项" then
+            exercise_kind = exercise_kind == "pushup" and "squat" or "pushup"
+            exercise_reps = 0
+        elseif choice == "停止" then
+            stop_motion(); motion_view = {state = "stopping"}; selection = 1
+        else
+            local allowed, id = game.exercise_candidate(exercise_kind)
+            if not allowed then error_message(id)
+            else
+                local accepted, reason = motion.start(exercise_kind, id)
+                if accepted == true then
+                    if game.start_exercise(exercise_kind, id) then
+                        dirty, selection, exercise_reps = true, 1, 0
+                        motion_view = {state = "starting", session_id = id, kind = exercise_kind}
+                    else stop_motion(); motion_view = {state = "error"} end
+                else motion_view = {state = "error", reason = reason or "backend_error"} end
+            end
+        end
     elseif page == "desk" then
         local choice = desk_labels(state)[selection]
         if choice == "回家" then set_page("home")
@@ -309,6 +432,8 @@ local function next_choice()
     if page == "home" then home_selection = home_selection % 5 + 1
     elseif page == "focus" then selection = selection % #focus_labels(game.snapshot()) + 1
     elseif page == "desk" then selection = selection % #desk_labels(game.snapshot()) + 1
+    elseif page == "rest" then selection = selection % 3 + 1
+    elseif page == "exercise" then selection = selection % #exercise_labels() + 1
     elseif page == "bag" then selection = selection % 6 + 1
     else selection = selection % 2 + 1 end
     draw()
@@ -326,6 +451,9 @@ local function clock_seconds()
     return nil
 end
 function on_start()
+    stop_motion()
+    exercise_kind, exercise_reps, motion_elapsed = "pushup", 0, 0
+    motion_view = {state = "unavailable"}
     page, home_selection, selection = "home", 1, 1
     uptime, draw_elapsed, click_at, tick_count = 0, 0, nil, 0
     toast, toast_until, animation_pose, animation_until = "", 0, 1, 0
@@ -373,6 +501,10 @@ function on_tick(dt_ms)
             animate(3); say("focus_done", 2); set_page("focus")
         end
     elseif event and event.kind == "cooking_finished" then finish_cooking() end
+    if page == "exercise" then
+        motion_elapsed = motion_elapsed + dt
+        if motion_elapsed >= 250 then motion_elapsed = 0; poll_motion() end
+    end
     if click_at and uptime - click_at >= 320 then click_at = nil; next_choice() end
     if dirty and uptime - last_save >= 10000 then
         last_save = uptime
@@ -397,8 +529,10 @@ function on_button_click(button_id)
     if click_at and uptime - click_at < 320 then click_at = nil; choose() else click_at = uptime end
 end
 function on_tts_result(id, result) if voice then voice.on_tts_result(id, result) end end
+function on_exit() stop_motion() end
 function ricestep_debug()
     return {page = page, selection = selection, home_selection = home_selection,
         state = game and game.snapshot() or nil, save_error = save_error, voice = voice and voice.debug() or nil,
-        line = uptime < toast_until and toast or nil, pose = animation_pose}
+        line = uptime < toast_until and toast or nil, pose = animation_pose,
+        motion = motion_view, exercise_reps = exercise_reps}
 end

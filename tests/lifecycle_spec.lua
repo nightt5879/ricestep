@@ -130,7 +130,7 @@ function on_tick(dt_ms)
         flush()
         equal(persisted.desk_left, 123456, "boot does not consume unknown offline time")
         for index = 1, 4 do single_click() end
-        double_click(); double_click()
+        double_click(); double_click(); double_click()
         equal(ricestep_debug().state.desk_status, "active", "restored reminder explicitly resumed")
         actual_tick(3456); flush()
         equal(persisted.desk_left, 110000, "running remainder autosaves without unrelated actions")
@@ -143,7 +143,7 @@ function on_tick(dt_ms)
         equal(ricestep_debug().state.desk_status, "due", "due reminder remains due after boot")
         equal(persisted.desk_left, 0, "due save is canonical")
         for index = 1, 4 do single_click() end
-        double_click(); single_click(); double_click(); flush()
+        double_click(); double_click(); single_click(); double_click(); flush()
         equal(persisted.desk, 3, "snoozed mode is persisted")
         equal(persisted.desk_left, 290000, "snooze remaining time is persisted")
         boot(persisted); flush()
@@ -152,7 +152,7 @@ function on_tick(dt_ms)
         phase = 7
     elseif phase == 7 then
         for index = 1, 4 do single_click() end
-        double_click(); double_click(); flush()
+        double_click(); double_click(); double_click(); flush()
         equal(persisted.desk, 3, "resuming keeps the short snooze mode")
         equal(persisted.desk_left, 280000, "resuming snooze does not reset it to a full session")
         single_click(); single_click(); double_click(); flush()

@@ -1,0 +1,38 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { verifyRuntime } = require('../scripts/package-pose-runtime.cjs');
+const { parseElf32 } = require('../scripts/verify-native-image.cjs');
+const root = path.resolve(__dirname, '..');
+const dir = path.join(root, 'dist/native/pose-runtime');
+const commandsPath = path.join(dir, 'compile_commands.json');
+const available = fs.existsSync(commandsPath) && fs.existsSync(path.join(dir, 'paired-candidate.json'));
+
+test('actual compiled runtime requires matching CP, config, layout and compiler evidence', {skip: !available}, () => {
+  const elf = fs.readFileSync(path.join(dir, 'arcs-mini3-ricestep.elf'));
+  const binary = fs.readFileSync(path.join(dir, 'arcs-mini3-ricestep.bin'));
+  const config = fs.readFileSync(path.join(dir, '.config'), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'overlay-manifest.json')));
+  const commands = JSON.parse(fs.readFileSync(commandsPath));
+  const check = (e = elf, b = binary, c = config, m = manifest, cc = commands) => verifyRuntime(e, b, c, m, cc);
+  assert.equal(check().profile, 'ricestep-mini3-pose-v1');
+  assert.throws(() => check(elf, binary, config, {...manifest, poseRuntime: false}), /runtime overlay/);
+  assert.throws(() => check(elf, binary, config.replace('CONFIG_RICESTEP_POSE=y', '# CONFIG_RICESTEP_POSE is not set')), /Missing CONFIG/);
+  assert.throws(() => check(elf, binary, config + '\nCONFIG_OTA=y\n'), /writers/);
+  const wrongSize = Buffer.from(binary); wrongSize[324] ^= 1;
+  assert.throws(() => check(elf, wrongSize), /header size/);
+  const wrongChecksum = Buffer.from(binary); wrongChecksum[380] ^= 1;
+  assert.throws(() => check(elf, wrongChecksum), /checksum/);
+  const wrongCode = Buffer.from(binary); wrongCode[500] ^= 1;
+  assert.throws(() => check(elf, wrongCode), /differs from ELF/);
+  const parsed = parseElf32(elf), symbol = parsed.symbols.find(s => s.name === 'rice_pose_profile');
+  const section = parsed.sections[symbol.sectionIndex];
+  const wrongLayout = Buffer.from(elf); wrongLayout[section.offset + symbol.value - section.address + 16] ^= 1;
+  assert.throws(() => check(wrongLayout), /layout/);
+  const badCommands = commands.map(c => /standalone[\\/]rice_pose\.c$/.test(c.file) ? {...c, command: c.command + ' -ffast-math'} : c);
+  assert.throws(() => check(elf, binary, config, manifest, badCommands), /floating point/);
+  const old = path.join(root, 'dist/native/pose-link-check/arcs-mini3-ricestep.elf');
+  if (fs.existsSync(old)) assert.throws(() => check(fs.readFileSync(old)), /resource profile/);
+});

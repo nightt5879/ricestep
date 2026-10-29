@@ -20,7 +20,7 @@ function create_game(options)
     local random = type(options.random) == "function" and options.random or math.random
     local MAX_RICE, MAX_WALK_MS, MAX_WALK_STEPS = 999, 86400000, 200000
     local state = {
-        v = 1, rice = 3, satiety = 50, mood = 70, bond = 0, fed = 0,
+        v = 2, rice = 3, satiety = 50, mood = 70, bond = 0, fed = 0,
         walks = 0, total_ms = 0, total_steps = 0, collection = 0,
         last_item = 0, last_new = false, session_id = 0, claimed_id = 0,
         status = "idle", source = "none", elapsed_ms = 0, step_count = 0,
@@ -28,6 +28,7 @@ function create_game(options)
         focus_status = "idle", focus_ms = 0, focus_id = 0, focus_claimed = 0, focus_count = 0,
         cook_count = 0, perfect_count = 0, last_meal = "",
         desk = DESK_OFF, desk_left = desk_interval,
+        exercise_id = 0, exercise_reps = 0,
     }
     local bounds = {
         rice = {0, MAX_RICE}, satiety = {20, 100}, mood = {0, 100},
@@ -43,8 +44,29 @@ function create_game(options)
         cook_count = {0, 1000000}, perfect_count = {0, 1000000},
         desk_left = {0, math.max(desk_interval, desk_snooze)},
     }
+    -- v2 packs the complete legacy walk entitlement, not just historical totals.
+    -- Nine bounded fields fit comfortably within the SDK's 256-byte string cap.
+    local walk_keys = {"status", "source", "elapsed_ms", "step_count", "session_id",
+        "claimed_id", "pending_item", "timer_carry", "step_carry"}
     local saved = options.saved
-    if type(saved) == "table" and saved.v == 1 then
+    if type(saved) == "table" and saved.v == 2 then
+        local decoded, fields = {}, {}
+        for key, value in pairs(saved) do decoded[key] = value end
+        for _, key in ipairs(walk_keys) do decoded[key] = nil end
+        if type(saved.walk) == "string" and #saved.walk <= 256 then
+            for value in string.gmatch(saved.walk, "[^|]+") do fields[#fields + 1] = value end
+            if #fields == #walk_keys and table.concat(fields, "|") == saved.walk then
+                for index, key in ipairs(walk_keys) do
+                    decoded[key] = index <= 2 and fields[index] or tonumber(fields[index])
+                end
+            end
+        end
+        saved = decoded
+        state.exercise_id = integer(saved.exercise_id, 0, 0, 1000000000)
+        state.exercise_reps = integer(saved.exercise_reps, 0, 0, 1000000)
+        if state.exercise_id == 0 then state.exercise_reps = 0 end
+    end
+    if type(saved) == "table" and (saved.v == 1 or saved.v == 2) then
         for key, range in pairs(bounds) do
             state[key] = integer(saved[key], state[key], range[1], range[2])
         end
@@ -95,6 +117,7 @@ function create_game(options)
     end
 
     local game = {}
+    local exercise_active, exercise_kind = false, ""
     -- A cooking round is deliberately transient: reloading never awards it.
     local cooking_status, cooking_ms, cooking_quality = "idle", 0, "none"
     local function cooking_position()
@@ -140,6 +163,7 @@ function create_game(options)
         data.focus_remaining_ms = math.max(0, focus_duration - state.focus_ms)
         data.desk_status, data.desk_remaining_ms = desk_names[state.desk + 1], state.desk_left
         data.desk_interval_ms, data.desk_snooze_ms = desk_interval, desk_snooze
+        data.exercise_active, data.exercise_kind = exercise_active, exercise_kind
         data.cooking_status, data.cooking_quality = cooking_status, cooking_quality
         data.cooking_elapsed_ms, data.cooking_remaining_ms = cooking_ms, 10000 - cooking_ms
         data.cooking_position = cooking_position()
@@ -151,9 +175,47 @@ function create_game(options)
     end
 
     function game.export()
-        -- Exactly 32 scalar fields; desk uses only its mode and remaining ms.
-        -- Caller supplies TTL and respects storage's write rate.
-        return copy_state()
+        -- 26 scalars: inventory and its exercise watermark are saved atomically.
+        local data, fields = copy_state(), {}
+        for index, key in ipairs(walk_keys) do fields[index], data[key] = tostring(state[key]), nil end
+        data.walk = table.concat(fields, "|")
+        return data
+    end
+
+    function game.exercise_candidate(kind)
+        if kind ~= "pushup" and kind ~= "squat" then return false, "invalid_kind" end
+        if exercise_active then return false, "exercise_in_progress" end
+        if state.exercise_id >= 1000000000 then return false, "session_limit" end
+        if cooking_status == "active" or cooking_status == "finished" then return false, "cooking_in_progress" end
+        if state.focus_status == "active" or state.focus_status == "finished" then return false, "focus_in_progress" end
+        if state.status == "active" or state.status == "paused" or state.status == "finished" then return false, "walk_in_progress" end
+        return true, state.exercise_id + 1
+    end
+    -- Call only AFTER the native start accepted this candidate ID. A busy or
+    -- failed native start must leave the persistent ledger entirely untouched.
+    function game.start_exercise(kind, session_id)
+        local ok, candidate = game.exercise_candidate(kind)
+        if not ok then return false, candidate end
+        if session_id ~= candidate then return false, "wrong_session" end
+        state.exercise_id, state.exercise_reps = session_id, 0
+        exercise_active, exercise_kind = true, kind
+        return true
+    end
+    function game.stop_exercise() exercise_active = false end
+    function game.accept_exercise(sample)
+        if not exercise_active then return false, "not_active" end
+        if type(sample) ~= "table" or sample.state ~= "running" or
+            sample.session_id ~= state.exercise_id or sample.kind ~= exercise_kind then return false, "wrong_session" end
+        local count = sample.reps
+        if type(count) ~= "number" or count < 0 or count > 1000000 or count % 1 ~= 0 then return false, "invalid_reps" end
+        if count <= state.exercise_reps then return false, "stale_reps" end
+        local earned = math.floor(count / 5) - math.floor(state.exercise_reps / 5)
+        local added = math.min(earned, MAX_RICE - state.rice)
+        state.exercise_reps, state.rice = count, state.rice + added
+        if state.desk == DESK_ACTIVE or state.desk == DESK_DUE or state.desk == DESK_SNOOZED then
+            state.desk, state.desk_left = DESK_ACTIVE, desk_interval
+        end
+        return true, {rice_added = added, total_reps = count}
     end
 
     function game.has_item(index)
@@ -172,6 +234,7 @@ function create_game(options)
     end
 
     function game.start_walk(source)
+        if exercise_active then return false, "exercise_in_progress" end
         if cooking_status == "active" or cooking_status == "finished" then return false, "cooking_in_progress" end
         if source ~= "timer" and source ~= "sensor" then return false, "invalid_source" end
         if state.focus_status == "active" or state.focus_status == "paused" or state.focus_status == "finished" then
@@ -329,6 +392,7 @@ function create_game(options)
     end
 
     function game.start_focus()
+        if exercise_active then return false, "exercise_in_progress" end
         if cooking_status == "active" or cooking_status == "finished" then return false, "cooking_in_progress" end
         if state.status == "active" or state.status == "paused" or state.status == "finished" then
             return false, "walk_in_progress"
@@ -347,6 +411,7 @@ function create_game(options)
     end
 
     function game.resume_focus()
+        if exercise_active then return false, "exercise_in_progress" end
         if cooking_status == "active" or cooking_status == "finished" then return false, "cooking_in_progress" end
         if state.focus_status ~= "paused" then return false, "not_paused" end
         state.focus_status = "active"
@@ -371,6 +436,7 @@ function create_game(options)
     end
 
     function game.start_cooking()
+        if exercise_active then return false, "exercise_in_progress" end
         if cooking_status == "active" then return false, "cooking_in_progress" end
         if cooking_status == "finished" then return false, "reward_pending" end
         if state.focus_status == "active" then return false, "focus_in_progress" end

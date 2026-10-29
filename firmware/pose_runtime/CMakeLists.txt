@@ -45,13 +45,15 @@ add_library(ricestep_pose STATIC
     "${RICESTEP_COMPONENTS_ROOT}/pose_decode/pose_movenet.c"
     "${RICESTEP_COMPONENTS_ROOT}/pose_image/pose_image.c"
     "${RICESTEP_COMPONENTS_ROOT}/pose_resources/pose_resources.c"
-    "${RICESTEP_COMPONENTS_ROOT}/motion_logic/motion_logic.c")
+    "${RICESTEP_COMPONENTS_ROOT}/motion_logic/motion_logic.c"
+    "${RICESTEP_COMPONENTS_ROOT}/pose_session/pose_session.c")
 target_include_directories(ricestep_pose PUBLIC
     "${RICESTEP_COMPONENTS_ROOT}/pose_engine"
     "${RICESTEP_COMPONENTS_ROOT}/pose_decode"
     "${RICESTEP_COMPONENTS_ROOT}/pose_image"
     "${RICESTEP_COMPONENTS_ROOT}/pose_resources"
-    "${RICESTEP_COMPONENTS_ROOT}/motion_logic")
+    "${RICESTEP_COMPONENTS_ROOT}/motion_logic"
+    "${RICESTEP_COMPONENTS_ROOT}/pose_session")
 target_compile_features(ricestep_pose PUBLIC c_std_11 cxx_std_17)
 target_link_libraries(ricestep_pose PUBLIC ricestep_tflm)
 foreach(target ricestep_tflm ricestep_pose)

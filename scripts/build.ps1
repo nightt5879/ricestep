@@ -24,16 +24,24 @@ $sourceText = $prefix
 foreach ($module in @('game.lua', 'character.lua', 'voice.lua', 'main.lua')) {
     $sourceText += "`n-- Module: $module`n" + [IO.File]::ReadAllText((Join-Path $RepoRoot "app/$module")) + "`n"
 }
-$sourceSize = [Text.Encoding]::UTF8.GetByteCount($sourceText)
-if ($sourceSize -gt 65536) { throw 'Bundled Lua source exceeds the SDK default 64 KiB limit.' }
 [IO.File]::WriteAllText($source, $sourceText, [Text.UTF8Encoding]::new($false))
 & node (Join-Path $PSScriptRoot 'minify-lua.cjs') $source
 if ($LASTEXITCODE -ne 0) { throw 'Lua source compaction failed.' }
 $sourceSize = (Get-Item -LiteralPath $source).Length
+if ($sourceSize -gt 65536) {
+    Remove-Item -LiteralPath $source
+    throw 'Compacted Lua source exceeds the SDK default 64 KiB limit.'
+}
 # New output name prevents a stale screenshot from passing a failed render.
 $preview = Join-Path $RepoRoot "dist/preview-$([Guid]::NewGuid().ToString('N')).png"
+$previewSource = $source + '.preview.lua'
 try {
-    Invoke-Headless -Source $source -Image $preview
+    # Build/render must never play audio. Only the temporary preview config is
+    # muted; the exported application retains its authored voice configuration.
+    $quietSource = [IO.File]::ReadAllText($source)
+    $quietSource = [regex]::Replace($quietSource, '^RICESTEP_CONFIG=\{tts_enabled=true', 'RICESTEP_CONFIG={sound_enabled=false,tts_enabled=false')
+    [IO.File]::WriteAllText($previewSource, $quietSource, [Text.UTF8Encoding]::new($false))
+    Invoke-Headless -Source $previewSource -Image $preview
     $bytes = [IO.File]::ReadAllBytes($preview)
     if ($bytes.Length -lt 24 -or [BitConverter]::ToString($bytes, 0, 8) -ne '89-50-4E-47-0D-0A-1A-0A') {
         throw 'Simulator output is not a valid PNG header.'
@@ -56,4 +64,5 @@ try {
 } finally {
     if (Test-Path -LiteralPath $preview) { Remove-Item -LiteralPath $preview }
     if (Test-Path -LiteralPath $source) { Remove-Item -LiteralPath $source }
+    if (Test-Path -LiteralPath $previewSource) { Remove-Item -LiteralPath $previewSource }
 }

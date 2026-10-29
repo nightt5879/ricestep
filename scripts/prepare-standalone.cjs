@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const cp = require('node:child_process');
 const { buildPack } = require('./generate-native-voice.cjs');
+const { minifyLua } = require('./minify-lua.cjs');
 const ROOT = path.resolve(__dirname, '..');
 const SDK_COMMIT = 'c0a95bcf3e45c7bd783ba4e997df19c96ffaaf35';
 const LUA = Object.freeze({ version: '5.4.8', url: 'https://www.lua.org/ftp/lua-5.4.8.tar.gz',
@@ -22,11 +23,16 @@ function replaceOnce(source, before, after, label) {
   return source.slice(0, index) + after + source.slice(index + before.length);
 }
 
-function buildPatches(read) {
+function buildPatches(read, { poseRuntime = false } = {}) {
   const patches = {};
   function edit(file, mutate) { patches[file] = mutate(normalize(read(file))); }
-  edit('apps/arcs-mini/Kconfig', s => s + '\nconfig RICESTEP_STANDALONE\n    bool "Resident offline RiceStep companion"\n    depends on MINIAPP && BOARD_ARCS_MINI3\n    default n\n');
+  edit('apps/arcs-mini/Kconfig', s => s + '\nconfig RICESTEP_STANDALONE\n    bool "Resident offline RiceStep companion"\n    depends on MINIAPP && BOARD_ARCS_MINI3\n    default n\n\nconfig RICESTEP_POSE\n    bool "RiceStep local camera exercise candidate"\n    depends on RICESTEP_STANDALONE && BOARD_ARCS_MINI3\n    default n\n');
   edit('apps/arcs-mini/arcs_mini3.conf', s => s + '\n# RiceStep opt-in standalone overlay; stock builds do not include this block.\nCONFIG_MINIAPP=y\nCONFIG_MINIAPP_ADB_DEBUG=n\nCONFIG_MINIAPP_BUZZER=n\nCONFIG_RICESTEP_STANDALONE=y\n# Keep application header/link dependencies; runtime startup is gated separately.\nCONFIG_ACOMP=y\nCONFIG_ACOMP_WAKEUP=y\nCONFIG_OTA=n\n');
+  patches['apps/arcs-mini/arcs_mini3.conf'] += `CONFIG_RICESTEP_POSE=${poseRuntime ? 'y' : 'n'}\n`;
+  edit('apps/arcs-mini/CMakeLists.txt', s => {
+    s = replaceOnce(s, 'add_custom_target(\n    combined_hex ALL', 'if(NOT CONFIG_RICESTEP_POSE)\nadd_custom_target(\n    combined_hex ALL', 'gate stock resource packages');
+    return replaceOnce(s, 'add_dependencies(ota_txz ${PROJECT_NAME})', 'add_dependencies(ota_txz ${PROJECT_NAME})\nendif() # Pose CP requires the separately verified matching resource bundle.', 'end stock package guard');
+  });
   edit('apps/arcs-mini/miniapp/CMakeLists.txt', s => {
     s = replaceOnce(s, 'set(MINIAPP_LUA_DIR ${PROJECT_TOP_DIR}/arcs-sdk/samples/subsys/lua/lua_binding_lvgl/components/lua)',
       'if(CONFIG_RICESTEP_STANDALONE)\n    set(MINIAPP_LUA_DIR ${PROJECT_TOP_DIR}/third_party/ricestep-lua)\nelse()\n    set(MINIAPP_LUA_DIR ${PROJECT_TOP_DIR}/arcs-sdk/samples/subsys/lua/lua_binding_lvgl/components/lua)\nendif()', 'Lua source directory');
@@ -43,6 +49,7 @@ function buildPatches(read) {
   });
   edit('apps/arcs-mini/miniapp/miniapp_runtime.c', s => {
     s = guard('#include "rice_standalone.h"') + s;
+    s = '#ifdef CONFIG_RICESTEP_POSE\n#include "rice_pose.h"\n#endif\n' + s;
     s = replaceOnce(s, 'if (vm->storage_read) {', 'if (vm->storage_read\n#ifdef CONFIG_RICESTEP_STANDALONE\n        && !rice_storage_owns(vm->id)\n#endif\n    ) {', 'preserve builtin save after script fault');
     s = replaceOnce(s, 'if (vm->faulted || vm->storage_pending == 2 || !ls_sys_time_is_valid())',
       'if (vm->faulted || vm->storage_pending == 2 || (!ls_sys_time_is_valid()\n#ifdef CONFIG_RICESTEP_STANDALONE\n        && !rice_storage_owns(vm->id)\n#endif\n    ))', 'clockless load');
@@ -54,6 +61,9 @@ function buildPatches(read) {
     s = replaceOnce(s, '    miniapp_http_discard(vm);\n    miniapp_tts_stop();',
       guard('    rice_audio_set_active(false);') + '    miniapp_http_discard(vm);\n    miniapp_tts_stop();', 'stop retired audio');
     s = replaceOnce(s, '    miniapp_set_active(true);', '    miniapp_set_active(true);\n' + guard('    rice_audio_set_active(true);'), 'activate local audio');
+    s = replaceOnce(s, '    rice_audio_set_active(false);', '    rice_audio_set_active(false);\n#ifdef CONFIG_RICESTEP_POSE\n    rice_pose_set_active(false);\n#endif', 'cancel pose on runtime stop');
+    s = replaceOnce(s, '        (*current_vm)->retiring = true;', '        (*current_vm)->retiring = true;\n#ifdef CONFIG_RICESTEP_POSE\n        rice_pose_set_active(false);\n#endif', 'cancel pose before retiring VM');
+    s = replaceOnce(s, '    rice_audio_set_active(true);', '    rice_audio_set_active(true);\n#ifdef CONFIG_RICESTEP_POSE\n    rice_pose_set_active(rice_storage_owns(candidate->id));\n#endif', 'authorize lazy pose start');
     s = replaceOnce(s, '    s_event_queue = xQueueCreate(8, sizeof(miniapp_event_t));',
       guard('    if (rice_audio_init() != 0) return -1;') + '    s_event_queue = xQueueCreate(8, sizeof(miniapp_event_t));', 'audio worker init');
     // Offline apps have no network-capable Lua surface. The stock code and
@@ -83,6 +93,12 @@ function buildPatches(read) {
     return replaceOnce(s, policy, except(policy), 'no network/wakeup prompt policy');
   });
   edit('src/system/platform.c', s => {
+    s = '#ifdef CONFIG_RICESTEP_POSE\n#include "rice_pose_profile.h"\n#endif\n' + s;
+    for (const [name, value] of [['TONE_BIN_ADDR', 'RICE_POSE_TONE_ADDRESS'], ['TONE_BIN_SIZE', 'RICE_POSE_TONE_BYTES'], ['EMOJI_BIN_ADDR', 'RICE_POSE_EMOJI_ADDRESS'], ['EMOJI_BIN_SIZE', 'RICE_POSE_EMOJI_BYTES']]) {
+      const matches = s.match(new RegExp(`^#define ${name} .+$`, 'gm')) || [];
+      if (matches.length !== 1) throw new Error(`Expected resource macro ${name}`);
+      s = replaceOnce(s, matches[0], `#ifdef CONFIG_RICESTEP_POSE\n#define ${name} ${value}\n#else\n${matches[0]}\n#endif`, name);
+    }
     const networkStart = '    if (ipc_ready) {\n        network_probe_init();';
     s = replaceOnce(s, networkStart, '#ifndef CONFIG_RICESTEP_STANDALONE\n' + networkStart, 'network init start');
     s = replaceOnce(s, '\n#if CONFIG_ACOMP\n', '\n#endif /* !CONFIG_RICESTEP_STANDALONE */\n\n#if CONFIG_ACOMP && !defined(CONFIG_RICESTEP_STANDALONE)\n', 'network and algorithm init end');
@@ -93,6 +109,17 @@ function buildPatches(read) {
     'int voice_platform_evt_init(void)\n{',
     'int voice_platform_evt_init(void)\n{\n' + guard('    return 0; /* Offline product never subscribes cloud connection/OTA events. */'),
     'cloud event init guard'));
+  edit('apps-ui/assets/fonts/font_romfs.c', s => {
+    s = '#ifdef CONFIG_RICESTEP_POSE\n#include "rice_pose_profile.h"\n#endif\n' + s;
+    for (const [before, name, value] of [
+      ['#define RESPAK_BIN_ADDR (CMN_FLASH_REGION + 0x00440000)', 'RESPAK_BIN_ADDR', 'RICE_POSE_FONTS_ADDRESS'],
+      ['#define RESPAK_BIN_SIZE (1792 * 1024)', 'RESPAK_BIN_SIZE', 'RICE_POSE_FONTS_BYTES']]) {
+      s = replaceOnce(s, before, `#ifdef CONFIG_RICESTEP_POSE\n#define ${name} ${value}\n#else\n${before}\n#endif`, name);
+    }
+    return s;
+  });
+  // Always retain ownership of these patched paths when switching profiles.
+  Object.assign(patches, require('./pose-camera-overlay.cjs').buildCameraPatches(read));
   return patches;
 }
 
@@ -106,7 +133,8 @@ function bundleFiles() {
   }
   if (!source.includes('base == "builtin://ricestep"')) throw new Error('app/voice.lua must explicitly support builtin://ricestep.');
   // Same concatenated chunk: game/dirty are the existing main.lua locals.
-  source += '\nfunction on_exit()\n    if game and type(storage) == "table" and type(storage.save) == "function" then\n        storage.save(game.export(), 2592000)\n    end\nend\n';
+  source += '\nlocal rice_app_exit = on_exit\nfunction on_exit()\n    if type(rice_app_exit) == "function" then rice_app_exit() end\n    if game and type(storage) == "table" and type(storage.save) == "function" then\n        storage.save(game.export(), 2592000)\n    end\nend\n';
+  source = minifyLua(source);
   const bytes = Buffer.from(source, 'utf8');
   if (bytes.length > 65536 || bytes.includes(0)) throw new Error('Resident Lua source exceeds the stock runtime limit or contains NUL.');
   const md5 = crypto.createHash('md5').update(bytes).digest('hex');
@@ -119,7 +147,8 @@ function bundleFiles() {
 
 function git(sdk, args) { return cp.execFileSync('git', ['-C', sdk, ...args], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).trimEnd(); }
 
-function prepare({ sdk, luaSource, apply = false, poseLinkCheck = false }) {
+function prepare({ sdk, luaSource, apply = false, poseLinkCheck = false, poseRuntime = false }) {
+  if (poseLinkCheck && poseRuntime) throw new Error('Choose dormant link check or camera runtime, not both.');
   sdk = fs.realpathSync(sdk); luaSource = fs.realpathSync(luaSource);
   const revision = git(sdk, ['rev-parse', 'HEAD']);
   if (revision !== SDK_COMMIT) throw new Error(`Unsupported SDK revision ${revision}; expected ${SDK_COMMIT}.`);
@@ -127,7 +156,7 @@ function prepare({ sdk, luaSource, apply = false, poseLinkCheck = false }) {
   if (!/^#define\s+LUA_VERSION_RELEASE\s+"8"\s*$/m.test(luaHeader) || !/^#define\s+LUA_VERSION_NUM\s+504\s*$/m.test(luaHeader)) {
     throw new Error('Expected official Lua 5.4.8 src directory. Verify its archive SHA-256 before extracting.');
   }
-  const tracked = buildPatches(file => git(sdk, ['show', `${SDK_COMMIT}:${file}`]) + '\n');
+  const tracked = buildPatches(file => git(sdk, ['show', `${SDK_COMMIT}:${file}`]) + '\n', { poseRuntime });
   const builtin = bundleFiles(), voice = buildPack();
   const files = { ...tracked };
   for (const name of fs.readdirSync(path.join(ROOT, 'firmware/standalone'))) {
@@ -142,14 +171,14 @@ function prepare({ sdk, luaSource, apply = false, poseLinkCheck = false }) {
   // Keep ownership hashes even when the optional target is disabled. Switching
   // pose -> desk -> pose must not turn our generated files into unknown edits.
   files['apps/arcs-mini/standalone/pose_runtime/CMakeLists.txt'] = fs.readFileSync(path.join(ROOT, 'firmware/pose_runtime/CMakeLists.txt'));
-  for (const component of ['pose_engine', 'pose_decode', 'pose_image', 'pose_resources', 'motion_logic']) {
+  for (const component of ['pose_engine', 'pose_decode', 'pose_image', 'pose_resources', 'motion_logic', 'pose_session']) {
     for (const name of fs.readdirSync(path.join(ROOT, 'firmware/components', component))) {
       if (!/\.(?:c|cc|h|inc)$/.test(name)) continue;
       files[`apps/arcs-mini/standalone/pose_components/${component}/${name}`] = fs.readFileSync(path.join(ROOT, 'firmware/components', component, name));
     }
   }
-  let poseConfig = 'set(RICESTEP_POSE_LINK_CHECK OFF)\n';
-  if (poseLinkCheck) {
+  let poseConfig = 'set(RICESTEP_POSE_LINK_CHECK OFF)\nset(RICESTEP_POSE_RUNTIME OFF)\n';
+  if (poseLinkCheck || poseRuntime) {
     cp.execFileSync(process.execPath, [path.join(ROOT, 'scripts/setup-pose-source.cjs'), '--check-only'], { stdio: 'inherit' });
     const sourceRoot = path.join(sdk, '..', 'tflm-source');
     const flatRoot = path.join(sdk, '..', 'tflm-flatbuffers');
@@ -158,7 +187,7 @@ function prepare({ sdk, luaSource, apply = false, poseLinkCheck = false }) {
         throw new Error('Pose source roots must share the verified SDK cache parent.');
       }
     }
-    poseConfig = 'set(RICESTEP_POSE_LINK_CHECK ON)\n' +
+    poseConfig = `set(RICESTEP_POSE_LINK_CHECK ${poseLinkCheck ? 'ON' : 'OFF'})\nset(RICESTEP_POSE_RUNTIME ${poseRuntime ? 'ON' : 'OFF'})\n` +
       `set(RICESTEP_TFLM_ROOT "${sourceRoot.replaceAll('\\', '/')}" )\n` +
       `set(RICESTEP_FLATBUFFERS_ROOT "${flatRoot.replaceAll('\\', '/')}" )\n` +
       'set(RICESTEP_COMPONENTS_ROOT "${CMAKE_CURRENT_LIST_DIR}/pose_components")\n';
@@ -188,16 +217,19 @@ function prepare({ sdk, luaSource, apply = false, poseLinkCheck = false }) {
     schema: 1, sdk_revision: SDK_COMMIT, sdk_origin: 'public third-party mirror; upstream identity unverified',
     lua: LUA, lua_source_sha256: Object.fromEntries(Object.entries(files).filter(([n]) => n.startsWith('third_party/')).map(([n,b]) => [n, sha(b)])),
     app: { bytes: builtin.bytes, sha256: builtin.sha256, modules: builtin.moduleHashes },
-    voice: voice.inventory, poseLinkCheck,
+    voice: voice.inventory, poseLinkCheck, poseRuntime,
     files: Object.fromEntries(Object.entries(files).map(([name,data]) => [name, sha(data)])),
   };
   if (apply) {
     for (const [name, data] of Object.entries(files)) {
       const target = path.join(sdk, name);
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, data);
+      // Preserve timestamps for identical generated sources so incremental
+      // native builds do not recompile the entire Lua/TFLM dependency tree.
+      if (!fs.existsSync(target) || !fs.readFileSync(target).equals(Buffer.from(data))) fs.writeFileSync(target, data);
     }
-    fs.writeFileSync(marker, JSON.stringify(manifest, null, 2) + '\n');
+    const manifestText = JSON.stringify(manifest, null, 2) + '\n';
+    if (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8') !== manifestText) fs.writeFileSync(marker, manifestText);
   }
   return { applied: apply, sdk, patched_paths: Object.keys(tracked), copied_paths: Object.keys(files).length - Object.keys(tracked).length,
     lua: LUA.version, source_bytes: builtin.bytes, voice_bytes: voice.inventory.total_bytes,
@@ -210,6 +242,7 @@ if (require.main === module) {
   for (let i = 0; i < args.length; ++i) {
     if (args[i] === '--apply') options.apply = true;
     else if (args[i] === '--pose-link-check') options.poseLinkCheck = true;
+    else if (args[i] === '--pose-runtime') options.poseRuntime = true;
     else if (args[i] === '--sdk' && args[i + 1]) options.sdk = args[++i];
     else if (args[i] === '--lua-source' && args[i + 1]) options.luaSource = args[++i];
     else throw new Error('Usage: node scripts/prepare-standalone.cjs --sdk PATH --lua-source PATH [--apply]');

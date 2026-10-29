@@ -115,7 +115,7 @@ function on_tick(dt_ms)
     elseif phase == 3 then
         single_click(); double_click()
         equal(ricestep_debug().page, "home", "leave remembered kitchen")
-        single_click(); single_click(); double_click()
+        single_click(); single_click(); double_click(); double_click()
         equal(ricestep_debug().home_selection, 5, "fifth home option preserves first four positions")
         equal(ricestep_debug().page, "desk", "open manual rest reminder")
         equal(ricestep_debug().state.desk_status, "off", "opening reminder does not start it")
@@ -143,7 +143,7 @@ function on_tick(dt_ms)
         equal(ricestep_debug().state.desk_status, "due", "background reminder reaches due")
         equal(ricestep_debug().state.rice, desk_rice, "due reminder earns no rice")
         for index = 1, 4 do single_click() end
-        double_click()
+        double_click(); double_click()
         phase = 5
     elseif phase == 5 then
         single_click(); double_click()
