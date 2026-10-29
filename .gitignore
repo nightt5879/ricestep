@@ -12,3 +12,5 @@ Thumbs.db
 node_modules/
 .local-config.json
 .voice-config.json
+__pycache__/
+*.py[cod]
