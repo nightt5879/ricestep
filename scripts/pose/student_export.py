@@ -1,4 +1,4 @@
-"""Mirror/export TinyPose NPZ weights with TensorFlow; host research only.
+"""Mirror/export explicitly selected pose NPZ weights; host research only.
 
 No downloads, camera access, training or firmware integration. Float export is
 always available. Full-int8 export requires an explicit representative images
@@ -16,12 +16,17 @@ import numpy as np
 import tensorflow as tf
 
 ARCHITECTURE = "ricestep-tiny-pose-v1"
+MOBILE_ARCHITECTURE = "ricestep-mobilenet-v1-025-pose-v1"
+WEIGHT_FORMATS = {ARCHITECTURE: "ricestep-tiny-pose-weights-v1",
+                  MOBILE_ARCHITECTURE: "ricestep-mobilenet-pose-weights-v1"}
 OFFSET_LAYOUT = "interleaved_yx_grid_units"
 BN_EPSILON = 1e-3
 
 
-def build_keras_model():
+def build_keras_model(architecture=ARCHITECTURE):
     """NHWC mirror. Return model and explicit Torch-state-name/layer mapping."""
+    if architecture not in WEIGHT_FORMATS:
+        raise ValueError("Unsupported pose architecture")
     mapping = {}
     def conv(x, name, ci, co, kernel=1, stride=1, depthwise=False):
         layer_name = name.replace(".", "_")
@@ -41,21 +46,33 @@ def build_keras_model():
     def ds(x, name, ci, co, stride=1):
         return conv(conv(x, name + ".dw", ci, ci, 3, stride, True), name + ".pw", ci, co)
     image = tf.keras.Input(batch_size=1, shape=(96, 96, 3), dtype=tf.float32, name="image")
-    x = conv(image, "stem", 3, 16, 3, 2)
-    skip24 = ds(ds(x, "enc24a", 16, 24, 2), "enc24b", 24, 24)
-    skip12 = ds(ds(skip24, "enc48a", 24, 48, 2), "enc48b", 48, 48)
-    x = ds(ds(ds(skip12, "enc96a", 48, 96, 2), "enc96b", 96, 96), "enc96c", 96, 96)
-    x = conv(x, "neck48", 96, 48)
+    if architecture == ARCHITECTURE:
+        x = conv(image, "stem", 3, 16, 3, 2)
+        skip24 = ds(ds(x, "enc24a", 16, 24, 2), "enc24b", 24, 24)
+        skip12 = ds(ds(skip24, "enc48a", 24, 48, 2), "enc48b", 48, 48)
+        x = ds(ds(ds(skip12, "enc96a", 48, 96, 2), "enc96b", 96, 96), "enc96c", 96, 96)
+        middle, final, deepest = 48, 24, 96
+    else:
+        x = conv(image, "backbone.stem", 3, 8, 3, 2)
+        channels = [(8,16,1), (16,32,2), (32,32,1), (32,64,2),
+                    (64,64,1), (64,128,2)] + [(128,128,1)] * 5
+        for index, (ci, co, stride) in enumerate(channels):
+            x = ds(x, f"backbone.blocks.{index}", ci, co, stride)
+            if index == 2: skip24 = x
+            if index == 4: skip12 = x
+        middle, final, deepest = 64, 32, 128
+    # BN momentum affects training updates, not this inference-only mirror.
+    x = conv(x, f"neck{middle}", deepest, middle)
     x = tf.image.resize(x, [12, 12], method="bilinear", antialias=False, name="up12")
-    x = ds(tf.keras.layers.Add(name="skip12_add")([x, skip12]), "dec48", 48, 48)
-    x = conv(x, "neck24", 48, 24)
+    x = ds(tf.keras.layers.Add(name="skip12_add")([x, skip12]), f"dec{middle}", middle, middle)
+    x = conv(x, f"neck{final}", middle, final)
     x = tf.image.resize(x, [24, 24], method="bilinear", antialias=False, name="up24")
-    x = ds(tf.keras.layers.Add(name="skip24_add")([x, skip24]), "dec24", 24, 24)
+    x = ds(tf.keras.layers.Add(name="skip24_add")([x, skip24]), f"dec{final}", final, final)
     logits = tf.keras.layers.Conv2D(17, 1, use_bias=True, name="heatmap_logits")
     offsets = tf.keras.layers.Conv2D(34, 1, use_bias=True, name="local_offsets")
-    model = tf.keras.Model(image, [logits(x), offsets(x)], name="ricestep_tiny_pose_v1")
-    mapping["heatmap"] = dict(head=logits, ci=24, co=17, kernel=1)
-    mapping["offset"] = dict(head=offsets, ci=24, co=34, kernel=1)
+    model = tf.keras.Model(image, [logits(x), offsets(x)], name=architecture.replace("-", "_"))
+    mapping["heatmap"] = dict(head=logits, ci=final, co=17, kernel=1)
+    mapping["offset"] = dict(head=offsets, ci=final, co=34, kernel=1)
     return model, mapping
 
 
@@ -76,8 +93,10 @@ def checked_npz(path, max_bytes):
     return np.load(path, allow_pickle=False)
 
 
-def load_weights(model, mapping, path):
+def load_weights(model, mapping, path, architecture=ARCHITECTURE):
     """Reject unexpected/missing/nonfinite weights and transpose explicit layouts."""
+    if architecture not in WEIGHT_FORMATS:
+        raise ValueError("Unsupported pose architecture")
     expected = {"__metadata__"}
     for name, layer in mapping.items():
         if "head" in layer:
@@ -93,8 +112,8 @@ def load_weights(model, mapping, path):
         if meta_bytes.dtype != np.uint8 or meta_bytes.ndim != 1 or meta_bytes.size > 65536:
             raise ValueError("Invalid weights metadata encoding")
         info = json.loads(meta_bytes.tobytes())
-        if (info.get("format") != "ricestep-tiny-pose-weights-v1" or
-            info.get("architecture") != ARCHITECTURE or info.get("offset_layout") != OFFSET_LAYOUT or
+        if (info.get("format") != WEIGHT_FORMATS[architecture] or
+            info.get("architecture") != architecture or info.get("offset_layout") != OFFSET_LAYOUT or
             info.get("bn_epsilon") != BN_EPSILON or info.get("input_layout") != "NCHW" or
             info.get("input_shape") != [1, 3, 96, 96] or info.get("input_range") != [-1, 1]):
             raise ValueError("Weights architecture/coordinate/preprocessing metadata mismatch")
@@ -199,14 +218,15 @@ def check_parity(model, reference_path):
     return dict(report, reference_sha256=sha256(reference_path), count=n), arrays
 
 
-def export_models(weights, output_dir, *, representative=None, representative_metadata=None, parity_reference=None):
+def export_models(weights, output_dir, *, representative=None, representative_metadata=None, parity_reference=None,
+                  architecture=ARCHITECTURE):
     if bool(representative) != bool(representative_metadata):
         raise ValueError("Full-int8 export requires BOTH representative images and provenance metadata")
     if representative is None and (Path(output_dir)/"student-int8.tflite").exists():
         raise ValueError("Float-only export target contains a previous int8 model; use a fresh output directory")
     images, calibration = (None, None) if representative is None else load_representative(representative, representative_metadata)
-    model, mapping = build_keras_model()
-    source_info = load_weights(model, mapping, weights)
+    model, mapping = build_keras_model(architecture)
+    source_info = load_weights(model, mapping, weights, architecture)
     parity, reference = (None, None) if parity_reference is None else check_parity(model, parity_reference)
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
@@ -246,7 +266,7 @@ def export_models(weights, output_dir, *, representative=None, representative_me
     if int8_data is not None:
         (target/"student-int8.tflite").write_bytes(int8_data)
         int8_info.update(bytes=len(int8_data), sha256=hashlib.sha256(int8_data).hexdigest())
-    report = dict(architecture=ARCHITECTURE, research_only=True, tensorflow_version=tf.__version__,
+    report = dict(architecture=architecture, research_only=True, tensorflow_version=tf.__version__,
         source_npz_sha256=sha256(weights), source=source_info, offset_layout=OFFSET_LAYOUT,
         exported_layout="NHWC", input_preprocessing="rgb*(2/255)-1", outputs_have_sigmoid=False,
         torch_parity=parity, float=float_info, int8=int8_info, calibration=calibration,
@@ -262,9 +282,12 @@ def main():
     parser.add_argument("--representative", type=Path)
     parser.add_argument("--representative-metadata", type=Path)
     parser.add_argument("--parity-reference", type=Path)
+    parser.add_argument("--architecture", choices=tuple(WEIGHT_FORMATS), default=ARCHITECTURE,
+                        help="Explicit contract; never inferred from untrusted weight metadata")
     args = parser.parse_args()
     report = export_models(args.weights, args.output_dir, representative=args.representative,
-        representative_metadata=args.representative_metadata, parity_reference=args.parity_reference)
+        representative_metadata=args.representative_metadata, parity_reference=args.parity_reference,
+        architecture=args.architecture)
     print(json.dumps(report, indent=2))
 
 

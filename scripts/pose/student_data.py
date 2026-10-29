@@ -73,12 +73,55 @@ def targets(points_grid, valid):
     return heat.astype(np.float32), offsets, np.repeat(weights, 2, axis=0)
 
 
+def preload_images(dataset, max_bytes):
+    """Optionally decode source RGB once without changing crop/augmentation.
+
+    The explicit budget bounds retained uint8 pixels, not total process RAM.
+    Validate the entire planned allocation before decoding and only publish
+    rows after all images succeed, so a failed preload leaves no partial cache.
+    Original paths, hashes and manifest metadata remain available for audit.
+    """
+    if type(max_bytes) is not int or not 0 < max_bytes <= 2 * 1024**3:
+        raise ValueError("Decoded image cache budget must be an integer in 1..2GiB")
+    rows = [row for split in ("train", "val") for row in dataset[split]]
+    required = 0
+    for row in rows:
+        if "_pixels" in row:
+            raise ValueError("Dataset already contains decoded pixels")
+        if any(type(row[key]) is not int or row[key] <= 0 for key in ("width", "height")):
+            raise ValueError("Invalid image dimensions for cache planning")
+        required += row["width"] * row["height"] * 3
+    if required > max_bytes:
+        raise ValueError(f"Decoded RGB requires {required} bytes, above cache budget {max_bytes}")
+    prepared = []
+    for row in rows:
+        with Image.open(row["local_path"]) as original:
+            if original.size != (row["width"], row["height"]):
+                raise ValueError("Image dimensions differ from manifest")
+            pixels = np.array(original.convert("RGB"), dtype=np.uint8, copy=True)
+        pixels.setflags(write=False)
+        prepared.append(pixels)
+    assert sum(pixels.nbytes for pixels in prepared) == required
+    for row, pixels in zip(rows, prepared):
+        row["_pixels"] = pixels
+    return {"images": len(rows), "decoded_bytes": required, "max_bytes": max_bytes,
+            "scope": "retained RGB arrays only; excludes Python/Pillow/training process overhead"}
+
+
 def sample(row, *, augment=False, seed=0):
     rng = np.random.default_rng(seed)
-    with Image.open(row["local_path"]) as original:
-        if original.size != (row["width"], row["height"]):
-            raise ValueError("Image dimensions differ from manifest")
-        image = original.convert("RGB")
+    if "_pixels" in row:
+        pixels = row["_pixels"]
+        if (not isinstance(pixels, np.ndarray) or pixels.dtype != np.uint8 or
+                pixels.shape != (row["height"], row["width"], 3) or pixels.flags.writeable or
+                not pixels.flags.c_contiguous):
+            raise ValueError("Invalid immutable RGB image cache")
+        image = Image.fromarray(pixels)
+    else:
+        with Image.open(row["local_path"]) as original:
+            if original.size != (row["width"], row["height"]):
+                raise ValueError("Image dimensions differ from manifest")
+            image = original.convert("RGB")
     x, y, w, h = map(float, row["bbox_xywh"])
     side = max(w, h) * (float(rng.uniform(1.25, 2.0)) if augment else 1.5)
     cx, cy = x + w / 2, y + h / 2

@@ -6,16 +6,55 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts/pose"))
-from student_data import FLIP, decode, load_manifest, sample, targets
+from student_data import FLIP, decode, load_manifest, preload_images, sample, targets
 
 
 class StudentDataTest(unittest.TestCase):
+    def test_decoded_cache_is_identical_and_avoids_repeat_io(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "source.jpg"
+            pixels = np.random.default_rng(82).integers(0, 256, (80, 120, 3), dtype=np.uint8)
+            Image.fromarray(pixels).save(path)
+            row = {"local_path": path, "width": 120, "height": 80, "image_id": 1,
+                   "bbox_xywh": [20, 10, 60, 60], "keypoints_xyv": [50, 40, 2] * 17}
+            expected = [sample(row, augment=True, seed=seed) for seed in range(8)]
+            dataset = {"train": [row], "val": []}
+            report = preload_images(dataset, 80 * 120 * 3)
+            self.assertEqual(report["decoded_bytes"], 28800)
+            self.assertFalse(row["_pixels"].flags.writeable)
+            with patch("student_data.Image.open", side_effect=AssertionError("Repeated image decode")):
+                for seed, reference in enumerate(expected):
+                    actual = sample(row, augment=True, seed=seed)
+                    for key in reference:
+                        np.testing.assert_array_equal(actual[key], reference[key])
+            with self.assertRaisesRegex(ValueError, "already contains"):
+                preload_images(dataset, 28800)
+
+    def test_cache_budget_and_decode_failure_leave_no_partial_rows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "source.png"
+            Image.new("RGB", (10, 10)).save(path)
+            row = {"local_path": path, "width": 10, "height": 10}
+            missing = {**row, "local_path": Path(temporary) / "missing.png"}
+            dataset = {"train": [row], "val": [missing]}
+            with patch("student_data.Image.open", side_effect=AssertionError("Must preflight budget")):
+                with self.assertRaisesRegex(ValueError, "above cache budget"):
+                    preload_images(dataset, 599)
+            with self.assertRaises(FileNotFoundError):
+                preload_images(dataset, 600)
+            self.assertNotIn("_pixels", row)
+            self.assertNotIn("_pixels", missing)
+            for bad in (0, -1, 1.5, True, 2 * 1024**3 + 1):
+                with self.assertRaises(ValueError):
+                    preload_images({"train": [row], "val": []}, bad)
+
     def test_local_residuals_reconstruct_subpixel_targets(self):
         rng = np.random.default_rng(26029)
         for _ in range(50):

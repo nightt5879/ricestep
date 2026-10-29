@@ -82,7 +82,7 @@ def evaluate(model, rows, batch_size, device, heatmap_loss="spatial", amplitude_
             "scope": "GT-box crops; not COCO AP, full-camera accuracy or calibrated confidence"}
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -94,10 +94,62 @@ def main():
     parser.add_argument("--heatmap-loss", choices=("spatial", "mse"), default="spatial")
     parser.add_argument("--amplitude-weight", type=float, default=5.0,
                         help="Gaussian BCE logit anchor; zero reproduces the early spatial-only pilot")
-    args = parser.parse_args()
+    parser.add_argument("--model", choices=("tiny", "mobilenet025"), default="tiny")
+    parser.add_argument("--backbone-weights", type=Path,
+                        help="Required local, verified backbone NPZ for mobilenet025; no automatic download")
+    parser.add_argument("--image-cache-mib", type=int, default=0,
+                        help="Decoded image cache budget0..2048MiB; zero preserves streaming reads")
+    args = parser.parse_args(argv)
     if (not 1 <= args.epochs <= 500 or not 1 <= args.batch_size <= 32 or
-            not 0 < args.learning_rate <= 0.01 or not 0 <= args.amplitude_weight <= 20):
+            not 0 < args.learning_rate <= 0.01 or not 0 <= args.amplitude_weight <= 20 or
+            not 0 <= args.image_cache_mib <= 2048):
         parser.error("Invalid training bounds")
+    if args.model == "tiny" and args.backbone_weights is not None:
+        parser.error("--backbone-weights is only valid for --model mobilenet025")
+    if args.model == "mobilenet025" and (args.backbone_weights is None or not args.backbone_weights.is_file()):
+        parser.error("--model mobilenet025 requires an existing --backbone-weights NPZ")
+    return args
+
+
+def create_model(choice, backbone_weights=None):
+    """Return a model and its matching profiler/exporter; never fetch or guess weights."""
+    if choice == "tiny":
+        if backbone_weights is not None:
+            raise ValueError("TinyPose does not accept backbone weights")
+        return TinyPose(), profile_model, export_numpy_weights, None
+    if choice != "mobilenet025":
+        raise ValueError("Unknown training model")
+    if backbone_weights is None or not Path(backbone_weights).is_file():
+        raise ValueError("MobileNetPose requires an existing pretrained backbone NPZ")
+    from mobilenet_student import (MobileNetPose, load_pretrained_backbone,
+                                  profile_model as mobile_profile,
+                                  export_numpy_weights as mobile_export)
+    path = Path(backbone_weights).resolve()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    model = MobileNetPose()
+    provenance = load_pretrained_backbone(model, path)  # Validation failure propagates; no random fallback.
+    if not isinstance(provenance, dict) or not provenance or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        raise ValueError("Backbone provenance is missing or the source changed while loading")
+    return model, mobile_profile, mobile_export, {
+        "weights_file": str(path), "weights_sha256": digest, "provenance": provenance}
+
+
+def cache_images(dataset, cache_mib):
+    if type(cache_mib) is not int or not 0 <= cache_mib <= 2048:
+        raise ValueError("Image cache budget must be an integer in0..2048MiB")
+    if cache_mib == 0:
+        return {"images": 0, "decoded_bytes": 0, "max_bytes": 0}
+    from student_data import preload_images
+    return preload_images(dataset, cache_mib * 1024 * 1024)
+
+
+def model_source_files(choice):
+    files = ("train_student.py", "student_model.py", "student_data.py")
+    return files + (("mobilenet_student.py",) if choice == "mobilenet025" else ())
+
+
+def main(argv=None):
+    args = parse_args(argv)
     out = (ROOT / args.output_dir).resolve()
     if not out.is_relative_to((ROOT / ".cache").resolve()) or out == (ROOT / ".cache").resolve():
         parser.error("Training artifacts must stay within a subdirectory of repository .cache")
@@ -106,9 +158,11 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     snapshots = out / "source-snapshot"
     snapshots.mkdir()
-    for name in ("train_student.py", "student_model.py", "student_data.py"):
+    source_files = model_source_files(args.model)
+    for name in source_files:
         shutil.copyfile(Path(__file__).parent / name, snapshots / name)
     dataset = load_manifest(args.manifest)
+    image_cache = cache_images(dataset, args.image_cache_mib)
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -120,18 +174,24 @@ def main():
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
-    model = TinyPose().to(args.device)
+    model, model_profile, model_export, backbone_pretraining = create_model(args.model, args.backbone_weights)
+    model.to(args.device)
+    architecture_profile = model_profile(model)
+    architecture = architecture_profile["architecture"]
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.0001)
     report = {"schema": 1, "status": "running", "seed": args.seed,
               "configuration": {"epochs": args.epochs, "batch_size": args.batch_size,
                                 "learning_rate": args.learning_rate, "weight_decay": 0.0001,
-                                "heatmap_loss": args.heatmap_loss, "amplitude_weight": args.amplitude_weight},
+                                "heatmap_loss": args.heatmap_loss, "amplitude_weight": args.amplitude_weight,
+                                "model": args.model, "image_cache_mib": args.image_cache_mib},
+              "architecture": architecture, "backbone_pretraining": backbone_pretraining,
+              "image_cache": image_cache,
               "manifest_sha256": hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
               "versions": {"torch": torch.__version__, "numpy": np.__version__},
               "device": args.device, "parameter_count": sum(p.numel() for p in model.parameters()),
-              "architecture_profile": profile_model(model),
-              "source_sha256": {name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
-                                for name in ("train_student.py", "student_model.py", "student_data.py")},
+              "architecture_profile": architecture_profile,
+              "source_sha256": {name: hashlib.sha256((snapshots / name).read_bytes()).hexdigest()
+                                for name in source_files},
               "training_images": len(dataset["train"]), "validation_images": len(dataset["val"]),
               "background_candidates_used": False, "hardware_validated": False,
               "confidence_calibrated": False, "firmware_changed": False,
@@ -167,6 +227,8 @@ def main():
                "validation": validation, "elapsed_seconds": time.monotonic() - started}
         report["epochs"].append(row)
         state = {"schema": 1, "epoch": epoch + 1,
+                 "architecture": architecture, "model_choice": args.model,
+                 "backbone_pretraining": backbone_pretraining,
                  "model": {name: value.detach().cpu().clone() for name, value in model.state_dict().items()},
                  "manifest_sha256": report["manifest_sha256"]}
         torch.save(state, out / "latest.pt")
@@ -195,9 +257,10 @@ def main():
     best_state = torch.load(out / "best.pt", map_location="cpu", weights_only=True)
     model.load_state_dict(best_state["model"])
     model.eval()
-    export_numpy_weights(model, out / "weights.npz", metadata={
+    model_export(model, out / "weights.npz", metadata={
         "training_status": "trained_experiment", "epoch": best_state["epoch"],
         "manifest_sha256": report["manifest_sha256"], "seed": args.seed,
+        "architecture": architecture, "backbone_pretraining": backbone_pretraining,
         "confidence_calibrated": False, "hardware_validated": False})
     parity_images = np.stack([sample(r)["input"] for r in dataset["val"][:16]])
     with torch.no_grad():

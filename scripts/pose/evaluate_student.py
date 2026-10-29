@@ -11,7 +11,6 @@ import argparse
 from collections import Counter
 import ctypes as C
 import hashlib
-import io
 import json
 from pathlib import Path
 import shutil
@@ -22,8 +21,7 @@ import numpy as np
 from PIL import Image, ImageDraw, __version__ as PIL_VERSION
 import torch
 
-from student_data import decode
-from student_model import TinyPose, INPUT_SIZE, GRID_SIZE
+from audit_student import architecture_id, load_snapshot_model, verify_checkpoint
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INDEX = ROOT / ".cache/research-pose/tfjs-exercise/squats-rgb565be/index.json"
@@ -59,8 +57,6 @@ def prepare(rgb):
     """Full 320x240 FOV -> 96x72 content + 12px top/bottom black, no AA."""
     if rgb.shape != (240, 320, 3) or rgb.dtype != np.uint8:
         raise ValueError("This exercise audit requires 320x240 uint8 RGB")
-    if (INPUT_SIZE, GRID_SIZE) != (96, 24):
-        raise ValueError("Student geometry changed; audit must be updated explicitly")
     image = Image.fromarray(rgb).transform((96, 96), Image.Transform.AFFINE,
         (320 / 96, 0, 0, 0, 320 / 96, -40),
         Image.Resampling.BILINEAR, fillcolor=(0, 0, 0))
@@ -216,22 +212,10 @@ def main():
     if not out.is_relative_to((ROOT/".cache").resolve()) or out.exists():
         raise ValueError("Output must be a new directory beneath repository .cache")
     geometry_checks()
-    checkpoint_bytes = args.checkpoint.read_bytes()
-    training = json.loads((args.checkpoint.parent/"training-report.json").read_text(encoding="utf-8"))
-    if training["status"] != "completed" or sha(checkpoint_bytes) != training["best_checkpoint_sha256"]:
-        raise ValueError("Only the completed training report's exact best checkpoint is accepted")
-    for name in ("student_model.py", "student_data.py"):
-        if sha((Path(__file__).parent/name).read_bytes()) != training["source_sha256"][name]:
-            raise ValueError("Model/data source differs from training provenance: " + name)
-    state = torch.load(io.BytesIO(checkpoint_bytes), map_location="cpu", weights_only=True)
-    if (state["schema"] != 1 or state["manifest_sha256"] != training["manifest_sha256"]
-            or state["epoch"] != training["best_epoch"]):
-        raise ValueError("Checkpoint provenance mismatch")
-    if any(not torch.isfinite(value).all() for value in state["model"].values()):
-        raise ValueError("Nonfinite checkpoint")
+    training, training_bytes, checkpoint_bytes, snapshots = verify_checkpoint(args.checkpoint)
     torch.set_num_threads(2)
-    model = TinyPose().cpu().eval()
-    model.load_state_dict(state["model"], strict=True)
+    model, data_source, state = load_snapshot_model(training, checkpoint_bytes, snapshots,
+                                                  args.checkpoint.parent / "source-snapshot")
     index = json.loads(args.index.read_text(encoding="utf-8"))
     if (index["width"],index["height"],index["stride_bytes"],index["pixel_format"]) != (320,240,640,"RGB565_BE"):
         raise ValueError("Unexpected exercise frame geometry/format")
@@ -251,12 +235,16 @@ def main():
     if len(frames) != 65:
         raise ValueError("Expected the pinned 65-frame exercise sequence")
     out.mkdir(parents=True)
+    (out/"training-report.json").write_bytes(training_bytes)
+    (out/"source-snapshot").mkdir()
+    for name, raw in snapshots.items():
+        (out/"source-snapshot"/name).write_bytes(raw)
     lib, native = build_bridge(out, args.compiler)
     records = []
     with torch.inference_mode():
         for frame, rgb in zip(frames, pixels):
             logits, offsets = model(torch.from_numpy(prepare(rgb)[None]))
-            decoded = decode(logits.numpy(), offsets.numpy())[0]
+            decoded = data_source.decode(logits.numpy(), offsets.numpy())[0]
             points, inside = unletterbox(decoded)
             native_result = Result()
             capture = 1000 + frame["capture_ms"]
@@ -282,12 +270,15 @@ def main():
         "cycle_frames":[row["frame"] for row in records if row["diagnostic_cycle_completed"]],
         "maximum_uncalibrated_sigmoid_peak":max(point[2] for row in records for point in row["decoded_grid_xy_uncalibrated_score"])}
     report = {"schema":1,"host_only":True,"physical_camera_used":False,"device_used":False,
+        "architecture":architecture_id(training),
         "firmware_changed":False,"training_performed":False,"reward_source":False,
         "confidence_calibrated":False,"accuracy_or_fps_claim":False,
         "checkpoint_sha256":sha(checkpoint_bytes),"training_manifest_sha256":state["manifest_sha256"],
         "evaluator_sha256":sha(Path(__file__).read_bytes()),
-        "model_data_source_sha256":{name:sha((Path(__file__).parent/name).read_bytes())
-            for name in ("student_model.py","student_data.py")},
+        "model_data_source_sha256":{name:sha(raw) for name,raw in snapshots.items()},
+        "training_report_sha256":sha(training_bytes),
+        "source_policy":"Uses verified training source-snapshot bytes, not current repository model/data source",
+        "snapshot_loader_sha256":sha((Path(__file__).parent/"audit_student.py").read_bytes()),
         "checkpoint_epoch":state["epoch"],"source_video_sha256":index["source_sha256"],
         "frame_manifest_sha256":sha(args.index.read_bytes()),"frame_sha256":[f["sha256"] for f in frames],
         "preprocessing":{"source":[320,240],"input":[96,96],"content":[96,72],"pad_left_top":[0,12],

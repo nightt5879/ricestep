@@ -8,7 +8,7 @@
 
 下载 [preview.html](docs/preview.html) 后用浏览器打开，可切换六种像素表情、预览喂饭动作、试听全部14句声音。素材和MP3均内嵌，不依赖开发板、电脑语音服务器或外部网站。它是外观与声音展览，不是完整游戏模拟器；[预览截图](docs/preview.png)可直接查看。
 
-预览从当前 `app/character.lua` 的API5图元及音频清单生成，更新素材后运行 `node scripts/export-preview.cjs`。未来“摄像头识别俯卧撑／波比跳，运动赚饭”的想法已记录在[后续路线](docs/roadmap.md)，尚未实现可靠运动识别。[小模型训练实验](docs/pose-student-experiment.md)已打通本地训练、整数转换与主机推理，但关节定位和置信度仍不满足计数要求，尚未接入固件。
+预览从当前 `app/character.lua` 的API5图元及音频清单生成，更新素材后运行 `node scripts/export-preview.cjs`。未来“摄像头识别俯卧撑／波比跳，运动赚饭”的想法已记录在[后续路线](docs/roadmap.md)，尚未实现可靠运动识别。[小模型训练实验](docs/pose-student-experiment.md)已打通本地训练、整数转换与主机推理；[新骨干实验](docs/pose-mobilenet-experiment.md)改善了手脚定位，但置信度和完整画面计数仍未达标，尚未接入固件。
 
 ## 玩法与操作
 

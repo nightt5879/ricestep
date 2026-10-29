@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import sys
 import types
 
 import numpy as np
@@ -19,6 +20,8 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_NAMES = ("student_model.py", "student_data.py", "train_student.py")
+TINY_ARCHITECTURE = "ricestep-tiny-pose-v1"
+MOBILE_ARCHITECTURE = "ricestep-mobilenet-v1-025-pose-v1"
 GROUPS = {"all": range(17), "face": range(5), "arms": range(5, 11),
           "legs": range(11, 17), "elbows_wrists": (7, 8, 9, 10),
           "knees_ankles": (13, 14, 15, 16)}
@@ -30,24 +33,43 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def verify_inputs(checkpoint, manifest):
+def architecture_id(metadata):
+    """Missing architecture is accepted only as the historical TinyPose ID."""
+    architecture = metadata.get("architecture", TINY_ARCHITECTURE)
+    if architecture not in (TINY_ARCHITECTURE, MOBILE_ARCHITECTURE):
+        raise ValueError("Unknown student architecture: " + repr(architecture))
+    return architecture
+
+
+def verify_checkpoint(checkpoint):
     """Reject altered artifacts before executing any saved training source."""
-    checkpoint, manifest = Path(checkpoint).resolve(), Path(manifest).resolve()
+    checkpoint = Path(checkpoint).resolve()
     report_bytes = (checkpoint.parent / "training-report.json").read_bytes()
     report = json.loads(report_bytes)
     if report.get("status") != "completed":
         raise ValueError("Training report is not completed")
-    checkpoint_bytes, manifest_bytes = checkpoint.read_bytes(), manifest.read_bytes()
+    architecture = architecture_id(report)
+    checkpoint_bytes = checkpoint.read_bytes()
     if sha(checkpoint_bytes) != report.get("best_checkpoint_sha256"):
         raise ValueError("Checkpoint differs from recorded best checkpoint")
-    if sha(manifest_bytes) != report.get("manifest_sha256"):
-        raise ValueError("Manifest differs from training provenance")
     sources = {}
-    for name in SOURCE_NAMES:
-        raw = (checkpoint.parent / "source-snapshot" / name).read_bytes()
+    names = SOURCE_NAMES + (("mobilenet_student.py",) if architecture == MOBILE_ARCHITECTURE else ())
+    for name in names:
+        path = checkpoint.parent / "source-snapshot" / name
+        if not path.is_file():
+            raise ValueError("Required training source snapshot missing: " + name)
+        raw = path.read_bytes()
         if sha(raw) != report.get("source_sha256", {}).get(name):
             raise ValueError("Training source snapshot hash mismatch: " + name)
         sources[name] = raw
+    return report, report_bytes, checkpoint_bytes, sources
+
+
+def verify_inputs(checkpoint, manifest):
+    report, report_bytes, checkpoint_bytes, sources = verify_checkpoint(checkpoint)
+    manifest_bytes = Path(manifest).resolve().read_bytes()
+    if sha(manifest_bytes) != report.get("manifest_sha256"):
+        raise ValueError("Manifest differs from training provenance")
     return report, report_bytes, checkpoint_bytes, manifest_bytes, sources
 
 
@@ -58,6 +80,60 @@ def snapshot_module(name, raw, source_path):
     module.__file__ = str(source_path)
     exec(compile(raw, str(source_path), "exec"), module.__dict__)
     return module
+
+
+def load_snapshot_model(training, checkpoint_bytes, sources, saved_root):
+    """Load a local verified snapshot, restoring any prior base-module binding.
+
+    The audit/evaluator CLIs are single-threaded during module loading. Mobile
+    imports student_model by name; it must see the verified base, never an
+    already-imported or current-working-tree module. No pretrained download or
+    initialization helper is called: the complete checkpoint supplies weights.
+    """
+    architecture = architecture_id(training)
+    names = SOURCE_NAMES + (("mobilenet_student.py",) if architecture == MOBILE_ARCHITECTURE else ())
+    for name in names:
+        if name not in sources or sha(sources[name]) != training.get("source_sha256", {}).get(name):
+            raise ValueError("Required verified training source missing or mismatched: " + name)
+    if sha(checkpoint_bytes) != training.get("best_checkpoint_sha256"):
+        raise ValueError("Checkpoint differs from recorded best checkpoint")
+    state = torch.load(io.BytesIO(checkpoint_bytes), map_location="cpu", weights_only=True)
+    if (state.get("schema") != 1 or state.get("manifest_sha256") != training["manifest_sha256"]
+            or state.get("epoch") != training["best_epoch"] or architecture_id(state) != architecture):
+        raise ValueError("Checkpoint provenance or architecture differs from completed training report")
+    if any(not torch.isfinite(value).all() for value in state["model"].values()):
+        raise ValueError("Checkpoint contains nonfinite model state")
+    saved_root = Path(saved_root)
+    base = snapshot_module("student_model.py", sources["student_model.py"], saved_root / "student_model.py")
+    data = snapshot_module("student_data.py", sources["student_data.py"], saved_root / "student_data.py")
+    if ((getattr(base, "INPUT_SIZE", None), getattr(base, "GRID_SIZE", None),
+         getattr(data, "INPUT", None), getattr(data, "GRID", None)) != (96, 24, 96, 24)
+            or getattr(base, "ARCHITECTURE", None) != TINY_ARCHITECTURE
+            or getattr(base, "OFFSET_LAYOUT", None) != "interleaved_yx_grid_units"):
+        raise ValueError("Saved model/data geometry or base architecture is incompatible")
+    if architecture == TINY_ARCHITECTURE:
+        model = base.TinyPose()
+    else:
+        absent = object()
+        previous = sys.modules.get("student_model", absent)
+        try:
+            sys.modules["student_model"] = base
+            mobile = snapshot_module("mobilenet_student.py", sources["mobilenet_student.py"],
+                                     saved_root / "mobilenet_student.py")
+            if getattr(mobile, "ARCHITECTURE", None) != architecture:
+                raise ValueError("Saved mobile architecture differs from training report")
+            if ((getattr(mobile, "INPUT_SIZE", None), getattr(mobile, "GRID_SIZE", None)) != (96, 24)
+                    or getattr(mobile, "OFFSET_LAYOUT", None) != "interleaved_yx_grid_units"):
+                raise ValueError("Saved mobile input/head coordinate contract is incompatible")
+            model = mobile.MobileNetPose()
+        finally:
+            if previous is absent:
+                sys.modules.pop("student_model", None)
+            else:
+                sys.modules["student_model"] = previous
+    model = model.cpu().eval()
+    model.load_state_dict(state["model"], strict=True)
+    return model, data, state
 
 
 def training_template(dataset, sample):
@@ -130,23 +206,14 @@ def run(checkpoint, manifest, output):
         raise ValueError("Output must be a new subdirectory beneath repository .cache")
     training, training_bytes, checkpoint_bytes, manifest_bytes, sources = verify_inputs(checkpoint, manifest)
     saved_root = checkpoint.parent / "source-snapshot"
-    model_source = snapshot_module("student_model.py", sources["student_model.py"], saved_root / "student_model.py")
-    data_source = snapshot_module("student_data.py", sources["student_data.py"], saved_root / "student_data.py")
+    torch.set_num_threads(2)
+    model, data_source, state = load_snapshot_model(training, checkpoint_bytes, sources, saved_root)
     dataset = data_source.load_manifest(manifest)  # Checks original image bytes/hashes and split isolation.
     if (len(dataset["train"]), len(dataset["val"])) != (training["training_images"], training["validation_images"]):
         raise ValueError("Dataset counts differ from training report")
     if {r["image_id"] for r in dataset["train"]} & {r["image_id"] for r in dataset["val"]}:
         raise ValueError("Training and validation image identifiers overlap")
     permutation = derangement(len(dataset["val"]))
-    state = torch.load(io.BytesIO(checkpoint_bytes), map_location="cpu", weights_only=True)
-    if (state.get("schema") != 1 or state.get("manifest_sha256") != training["manifest_sha256"]
-            or state.get("epoch") != training["best_epoch"]):
-        raise ValueError("Checkpoint provenance differs from completed training report")
-    if any(not torch.isfinite(value).all() for value in state["model"].values()):
-        raise ValueError("Checkpoint contains nonfinite model state")
-    torch.set_num_threads(2)
-    model = model_source.TinyPose().cpu().eval()
-    model.load_state_dict(state["model"], strict=True)
     out.mkdir(parents=True, exist_ok=False)
     (out / "input-manifest.json").write_bytes(manifest_bytes)
     (out / "training-report.json").write_bytes(training_bytes)
@@ -176,6 +243,7 @@ def run(checkpoint, manifest, output):
                    "blank_midgray": infer(np.zeros_like(images)), "shuffled_images": infer(images[permutation]),
                    "train_mean_template": np.broadcast_to(template, (n, 17, 2)).copy()}
     report = dict(schema=1, host_only=True, cpu_only=True, training_performed=False, device_used=False,
+        architecture=architecture_id(training),
         checkpoint_sha256=sha(checkpoint_bytes), checkpoint_epoch=state["epoch"],
         training_report_sha256=sha(training_bytes), manifest_sha256=sha(manifest_bytes),
         evaluator_sha256=sha(Path(__file__).read_bytes()),
