@@ -5,7 +5,8 @@ param(
     [string]$ToolsRoot,
     [string]$LuaSource,
     [ValidatePattern('^build-[a-zA-Z0-9_-]+$')]
-    [string]$BuildName
+    [string]$BuildName,
+    [switch]$PoseLinkCheck
 )
 . (Join-Path $PSScriptRoot 'common.ps1')
 if (-not $IsWindows) { throw 'This wrapper requires Windows and its verified native toolchain.' }
@@ -74,9 +75,14 @@ try {
     # custom tool path must not reuse a CMake cache containing old absolute paths.
     $pathIdentity = (@($SdkRoot, $ToolsRoot, $LuaSource) -join "`n").ToLowerInvariant()
     $pathHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($pathIdentity))).Substring(0, 8).ToLowerInvariant()
-    if (-not $BuildName) { $BuildName = "build-standalone-$pathHash" }
+    if (-not $BuildName) {
+        $kind = if ($PoseLinkCheck) { 'pose-link' } else { 'standalone' }
+        $BuildName = "build-$kind-$pathHash"
+    }
     $buildDirectory = Join-Path $SdkRoot $BuildName
-    & node (Join-Path $PSScriptRoot 'prepare-standalone.cjs') --sdk $SdkRoot --lua-source $LuaSource --apply
+    $prepareArgs = @('--sdk', $SdkRoot, '--lua-source', $LuaSource, '--apply')
+    if ($PoseLinkCheck) { $prepareArgs += '--pose-link-check' }
+    & node (Join-Path $PSScriptRoot 'prepare-standalone.cjs') @prepareArgs
     if ($LASTEXITCODE -ne 0) { throw 'Standalone source preparation failed.' }
     Push-Location $SdkRoot
     $locationPushed = $true
@@ -91,11 +97,15 @@ try {
     # The reviewed Mini3 partition table reserves 0x600000..0xA00000 for CP.
     $size = (Get-Item -LiteralPath $binary).Length
     if ($size -le 0 -or $size -gt 0x400000) { throw 'CP firmware does not fit the reviewed 4 MiB app partition.' }
-    $output = Join-Path $RepoRoot 'dist/native/standalone'
+    $output = Join-Path $RepoRoot $(if ($PoseLinkCheck) { 'dist/native/pose-link-check' } else { 'dist/native/standalone' })
     $null = New-Item -ItemType Directory -Path $output -Force
     $elf = Join-Path $buildDirectory 'arcs-mini'
     & node (Join-Path $PSScriptRoot 'verify-native-image.cjs') --elf $elf --bin $binary --manifest (Join-Path $SdkRoot 'apps/arcs-mini/standalone/overlay-manifest.json') --report (Join-Path $output 'image-verification.json')
     if ($LASTEXITCODE -ne 0) { throw 'Native image integrity or Flash placement verification failed.' }
+    if ($PoseLinkCheck) {
+        & node (Join-Path $PSScriptRoot 'verify-pose-link.cjs') $elf (Join-Path $buildDirectory 'compile_commands.json') (Join-Path $output 'pose-link-verification.json')
+        if ($LASTEXITCODE -ne 0) { throw 'Pose runtime was not correctly linked or used incompatible compiler flags.' }
+    }
     Copy-Item -LiteralPath $binary -Destination (Join-Path $output 'arcs-mini3-ricestep.bin') -Force
     Copy-Item -LiteralPath $elf -Destination (Join-Path $output 'arcs-mini3-ricestep.elf') -Force
     Copy-Item -LiteralPath (Join-Path $SdkRoot 'apps/arcs-mini/standalone/overlay-manifest.json') -Destination $output -Force
@@ -109,7 +119,7 @@ try {
         flashOffset = '0x600000'; partitionBytes = 0x400000
         buildDirectory = $buildDirectory; nativePathIdentity = $pathHash
         verification = 'compiled; ELF/bin voice and Lua integrity, ROM placement and startup scatter tables verified; hardware untested'
-        flashed = $false
+        flashed = $false; poseLinkCheck = [bool]$PoseLinkCheck
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'build-info.json') -Encoding utf8
     Write-Host 'Standalone firmware compiled and exported. No device was flashed.'
 } finally {

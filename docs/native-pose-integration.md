@@ -1,6 +1,6 @@
 # Mini3 原生姿态模型：存储与 CPU 接入评估
 
-2026-10-29 只读审查。没有修改 SDK、生成新分区镜像、刷写、访问摄像头或播放声音。下述资源布局是待实现、待验证的方案，不是已部署配置。
+2026-10-29 静态审查及主机离线打包。没有修改 SDK 或原厂分区配置、刷写、访问摄像头或播放声音。下述资源布局已实现独立候选打包与主机校验，仍未接入设备运行时，不是已部署配置。
 
 ## 结论
 
@@ -59,16 +59,30 @@ Flash 资源可直接只读访问，有现成路径：
 3. [`src/middleware/ota/ota_flash.c`](https://github.com/Shinku-Chen/listenai_arcs_mini/blob/c0a95bcf3e45c7bd783ba4e997df19c96ffaaf35/src/middleware/ota/ota_flash.c) 仍写死原资源位置。此 profile 必须保持 `CONFIG_OTA=n` 且排除所有资源更新路径；未来恢复 OTA 时必须先实现 profile-aware 更新，不能只改 JSON。
 4. 使用保存的原厂包制定恢复清单，恢复旧 CP **和**旧资源位置。新布局不能直接回刷旧 CP 后假定页面/字体仍正常；不能把镜像自产完整 LPK 当作原厂 3.1.0 恢复包。
 
-下一次只在主机上即可验证：布局无重叠且全部写入范围在 `0x100000..0x600000`；三个保留资源的哈希不变；在两个不同基址的主机缓冲中用真实 ROMFS 解析代码找到字体/表情并核对返回字节；模型 header 的越界、截断、错哈希应拒绝；最终 ELF 不含第二份模型副本，也不把权重加入 PSRAM 启动复制表。上述验证尚未实现，因此这不是可直接执行的烧写清单。
+已增加 [离线打包脚本](../scripts/prepare-pose-resources.cjs)、[版本化 profile](../firmware/resource-profiles/mini3-pose-v1.json) 和[只读 C 校验组件](../firmware/components/pose_resources/README.md)。输出位于忽略目录 `dist/native/pose-resources/`；Node 测试用真实 SHA-256 验证布局范围、完整保留资源、模型、头格式与损坏拒绝，C 测试验证有界解析及注入哈希回调的行为。C 组件尚未连接 Flash 或生产哈希库，不能据此声称板端 Flash 已校验。
+
+仍需：在两个不同基址的主机缓冲中用真实 ROMFS 解析代码找到字体/表情并核对返回字节；集成真实 SHA-256 provider；最终 ELF 不含第二份模型副本且权重不进入 PSRAM 启动复制表。这不是可直接执行的烧写清单。
 
 ## CPU TFLM 编译入口
 
 现有 SDK 的 `arcs-sdk/labs` 只有 lnn、zig；没有 TFLM 子模块。最新[厂商 TFLM Hello World](https://docs2.listenai.com/arcs-sdk/latest/zh/html/labs/tflite_micro/hello_world/README.html)依赖 `modules/tflite-micro` 和 Luna 注册函数，目标为带 NPU 的 LS2684/CSK7004；它的 CPU0/EVB 工程不能直接作为 Mini3 CP 镜像。
 
+本仓库已补充独立源码准备入口；使用 Node、Python 3 和 Git，缺少缓存时才用 curl 下载锁定的 HTTPS 归档：
+
+```powershell
+node scripts/setup-pose-source.cjs
+node scripts/setup-pose-source.cjs --check-only
+node --test tests/setup-pose-source.test.cjs
+```
+
+`pose-runtime.lock.json` 固定两个官方归档的 SHA-256：TFLM commit 源码及 FlatBuffers 25.9.23。安装位置分别为 `.cache/tflm-source`、`.cache/tflm-flatbuffers`，没有下载 KissFFT 等当前 CPU 图不需要的依赖。两份归档校验后先在私有临时目录解包，再从仓库根目录用显式 `git apply --directory=<暂存目录>` 应用 TFLM 内的五文件 `flatbuffers.patch`，并确认五个文件确实改变，避免 Git 在嵌套目录中静默跳过补丁。
+
+已有源码必须与重新解包并打补丁后的完整树匹配，任何修改、缺失或额外文件都会报错，不覆盖用户源码。当前核对 TFLM 1805 个文件、FlatBuffers 1881 个文件及其目录和 9 个内部相对链接；清单保存在 `.cache/pose-source-inventory.json`。`--check-only` 不联网、不更新清单或已安装源码，仍会在临时目录重建期望树并核对每个文件，结束后清理自己的暂存目录。归档路径穿越、大小写别名、绝对/逃逸/循环链接均拒绝；官方合法内部链接按目标系统路径格式保留。
+
 可复用与主机参考实验同源的 [TensorFlow TFLM `fed64d19`](https://github.com/tensorflow/tflite-micro/tree/fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb)，经 `gh api` 只读核实：
 
 - [`tools/make/Makefile`](https://github.com/tensorflow/tflite-micro/blob/fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb/tensorflow/lite/micro/tools/make/Makefile) 提供 `microlite` / `libtflm` 静态库目标、`list_library_sources`、`list_library_headers`、`list_third_party_sources`、`list_third_party_headers`，使用 C++17，禁 RTTI/异常/线程安全静态初始化。第三方依赖需固定校验，不能假定当前 wheel 等于完整可交叉编译源码。
-- [`targets/riscv32_generic_makefile.inc`](https://github.com/tensorflow/tflite-micro/blob/fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb/tensorflow/lite/micro/tools/make/targets/riscv32_generic_makefile.inc) 是可用的通用 RISC-V 起点，默认 `rv32imc`/`ilp32`、`riscv64-unknown-elf-`；实际 Mini3 CP 构建为 `rv32imac_zba_zbb_zbc_zbs`/`ilp32`、Nuclei 300 tune。后续应继承现有 SDK 工具链/ABI 构建一个独立 C++ library target，而不是使用默认下载工具链或独立 EVB 链接脚本。
+- [`targets/riscv32_generic_makefile.inc`](https://github.com/tensorflow/tflite-micro/blob/fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb/tensorflow/lite/micro/tools/make/targets/riscv32_generic_makefile.inc) 是可用的通用 RISC-V 起点，默认 `rv32imc`/`ilp32`、`riscv64-unknown-elf-`；实际 Mini3 CP 构建为 `rv32imac_zba_zbb_zbc_zbs`/`ilp32`、`-mtune=nuclei-300-series`，属于无 F 扩展的 soft-float ABI。后续应继承现有 SDK 工具链/ABI 构建一个独立 C++ library target，而不是使用默认下载工具链或独立 EVB 链接脚本。SDK 全局还打开了 `-ffast-math`；姿态/TFLM target 必须在其后显式覆盖 `-fno-fast-math -ffp-contract=off`，保留解码器所需的 IEEE float32/舍入行为，不能仅保留 ISA/ABI 就宣称数值兼容。
 - 使用 [`MicroMutableOpResolver`](https://github.com/tensorflow/tflite-micro/blob/fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb/tensorflow/lite/micro/micro_mutable_op_resolver.h) 及普通 CPU `kernels/conv.cc`、`depthwise_conv.cc`、`resize_bilinear.cc` 等；按实际四头 FlatBuffer 的算子集合生成 resolver。禁止 `tflite::luna::*`、Luna workspace 和权重预打包。原完整模型含 CAST 等已知不兼容路径，不能误装原始全图。
 - [`system_setup.cc`](https://github.com/tensorflow/tflite-micro/blob/fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb/tensorflow/lite/micro/system_setup.cc) 的参考 `InitializeTarget()` 为空；[`micro_time.cc`](https://github.com/tensorflow/tflite-micro/blob/fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb/tensorflow/lite/micro/micro_time.cc) 默认计时函数返回 0。移植应接 SDK 日志和真实 cycle/tick 计时，否则性能报告没有意义。
 

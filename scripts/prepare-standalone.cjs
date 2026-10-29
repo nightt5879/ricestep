@@ -119,7 +119,7 @@ function bundleFiles() {
 
 function git(sdk, args) { return cp.execFileSync('git', ['-C', sdk, ...args], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).trimEnd(); }
 
-function prepare({ sdk, luaSource, apply = false }) {
+function prepare({ sdk, luaSource, apply = false, poseLinkCheck = false }) {
   sdk = fs.realpathSync(sdk); luaSource = fs.realpathSync(luaSource);
   const revision = git(sdk, ['rev-parse', 'HEAD']);
   if (revision !== SDK_COMMIT) throw new Error(`Unsupported SDK revision ${revision}; expected ${SDK_COMMIT}.`);
@@ -139,6 +139,31 @@ function prepare({ sdk, luaSource, apply = false }) {
   files['apps/arcs-mini/standalone/voice_pack.h'] = voice.header;
   files['apps/arcs-mini/standalone/voice_pack.c'] = voice.source;
   files['apps/arcs-mini/standalone/voice_pack.inventory.json'] = JSON.stringify(voice.inventory, null, 2) + '\n';
+  // Keep ownership hashes even when the optional target is disabled. Switching
+  // pose -> desk -> pose must not turn our generated files into unknown edits.
+  files['apps/arcs-mini/standalone/pose_runtime/CMakeLists.txt'] = fs.readFileSync(path.join(ROOT, 'firmware/pose_runtime/CMakeLists.txt'));
+  for (const component of ['pose_engine', 'pose_decode', 'pose_image', 'pose_resources', 'motion_logic']) {
+    for (const name of fs.readdirSync(path.join(ROOT, 'firmware/components', component))) {
+      if (!/\.(?:c|cc|h|inc)$/.test(name)) continue;
+      files[`apps/arcs-mini/standalone/pose_components/${component}/${name}`] = fs.readFileSync(path.join(ROOT, 'firmware/components', component, name));
+    }
+  }
+  let poseConfig = 'set(RICESTEP_POSE_LINK_CHECK OFF)\n';
+  if (poseLinkCheck) {
+    cp.execFileSync(process.execPath, [path.join(ROOT, 'scripts/setup-pose-source.cjs'), '--check-only'], { stdio: 'inherit' });
+    const sourceRoot = path.join(sdk, '..', 'tflm-source');
+    const flatRoot = path.join(sdk, '..', 'tflm-flatbuffers');
+    for (const dir of [sourceRoot, flatRoot]) {
+      if (fs.realpathSync.native(dir) !== fs.realpathSync.native(path.join(ROOT, '.cache', path.basename(dir)))) {
+        throw new Error('Pose source roots must share the verified SDK cache parent.');
+      }
+    }
+    poseConfig = 'set(RICESTEP_POSE_LINK_CHECK ON)\n' +
+      `set(RICESTEP_TFLM_ROOT "${sourceRoot.replaceAll('\\', '/')}" )\n` +
+      `set(RICESTEP_FLATBUFFERS_ROOT "${flatRoot.replaceAll('\\', '/')}" )\n` +
+      'set(RICESTEP_COMPONENTS_ROOT "${CMAKE_CURRENT_LIST_DIR}/pose_components")\n';
+  }
+  files['apps/arcs-mini/standalone/pose-config.cmake'] = poseConfig;
   for (const name of fs.readdirSync(luaSource)) {
     if (/\.[ch]$/.test(name)) files['third_party/ricestep-lua/' + name] = fs.readFileSync(path.join(luaSource, name));
   }
@@ -163,7 +188,8 @@ function prepare({ sdk, luaSource, apply = false }) {
     schema: 1, sdk_revision: SDK_COMMIT, sdk_origin: 'public third-party mirror; upstream identity unverified',
     lua: LUA, lua_source_sha256: Object.fromEntries(Object.entries(files).filter(([n]) => n.startsWith('third_party/')).map(([n,b]) => [n, sha(b)])),
     app: { bytes: builtin.bytes, sha256: builtin.sha256, modules: builtin.moduleHashes },
-    voice: voice.inventory, files: Object.fromEntries(Object.entries(files).map(([name,data]) => [name, sha(data)])),
+    voice: voice.inventory, poseLinkCheck,
+    files: Object.fromEntries(Object.entries(files).map(([name,data]) => [name, sha(data)])),
   };
   if (apply) {
     for (const [name, data] of Object.entries(files)) {
@@ -183,6 +209,7 @@ if (require.main === module) {
   const args = process.argv.slice(2), options = {};
   for (let i = 0; i < args.length; ++i) {
     if (args[i] === '--apply') options.apply = true;
+    else if (args[i] === '--pose-link-check') options.poseLinkCheck = true;
     else if (args[i] === '--sdk' && args[i + 1]) options.sdk = args[++i];
     else if (args[i] === '--lua-source' && args[i + 1]) options.luaSource = args[++i];
     else throw new Error('Usage: node scripts/prepare-standalone.cjs --sdk PATH --lua-source PATH [--apply]');

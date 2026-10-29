@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "id": "ricestep-mini3-pose-v1",
+  "board": "arcs_mini3",
+  "status": "offline-candidate-not-deployed",
+  "flash_base": 805306368,
+  "flash_bytes": 16777216,
+  "resource_start": 1048576,
+  "resource_end": 6291456,
+  "alignment": 65536,
+  "reserved": [
+    { "name": "boot-boot_control-ap", "offset": 0, "bytes": 1048576 },
+    { "name": "cp-app", "offset": 6291456, "bytes": 4194304 },
+    { "name": "ota-staging", "offset": 10485760, "bytes": 5242880 },
+    { "name": "kv", "offset": 15728640, "bytes": 1048576 }
+  ],
+  "resources": [
+    { "id": "tone", "offset": 1048576, "window_bytes": 524288, "file": "tone.bin", "bytes": 351232, "sha256": "382bc1ef35abbefed4da06d12e65d8aaaca688666e1e4996d32654534f96e67e" },
+    { "id": "pose", "offset": 1572864, "window_bytes": 3145728, "file": "pose.bin", "bytes": 2891896, "sha256": "9051a5ceebc1eb5f535c1b1afe58d33ce878bf9358a159cbfc689c1abebf9c68", "header_bytes": 4096 },
+    { "id": "respak", "offset": 4718592, "window_bytes": 1048576, "file": "respak.bin", "bytes": 983040, "sha256": "31b05d15a242b8eb87a24ace43141c06e4ae6a54eff7ab17c3b9c01721b7c816" },
+    { "id": "emoji", "offset": 5767168, "window_bytes": 524288, "file": "emoji.bin", "bytes": 492544, "sha256": "af4d0d9dbbd0ba7d33a001966160542fd645c529b1b7f795a68c2de7c36f7aa7" }
+  ],
+  "model_contract": {
+    "header_version": 1,
+    "profile_version": 1,
+    "format": 1,
+    "decoder_version": 1,
+    "input_version": 1,
+    "tflite_schema": 3,
+    "source_sha256": "cd7cc22fa946e5d146a7b98d496853e1923e22828d3972d579973f27f91bb105"
+  },
+  "requirements": {
+    "matching_cp_resource_profile": true,
+    "wakeup_engine_disabled": true,
+    "ota_resource_writers_disabled": true,
+    "restore_cp_and_stock_resources_together": true
+  }
+}

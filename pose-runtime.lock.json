@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "tflm": {
+    "commit": "fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb",
+    "url": "https://codeload.github.com/tensorflow/tflite-micro/zip/fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb",
+    "archive": "tflm-fed64.zip",
+    "prefix": "tflite-micro-fed64d19fb5af8d28ee108c07838d5c0ae3ddcbb",
+    "directory": "tflm-source",
+    "sha256": "406ed2a2677049cfa6669be21d9429dd6149b4397941650ed2cde2782bd55d4f"
+  },
+  "flatbuffers": {
+    "version": "25.9.23",
+    "url": "https://codeload.github.com/google/flatbuffers/tar.gz/refs/tags/v25.9.23",
+    "archive": "flatbuffers-25.9.23.tar.gz",
+    "prefix": "flatbuffers-25.9.23",
+    "directory": "tflm-flatbuffers",
+    "sha256": "9102253214dea6ae10c2ac966ea1ed2155d22202390b532d1dea64935c518ada",
+    "patch": "tensorflow/lite/micro/tools/make/flatbuffers.patch"
+  },
+  "ops": ["SUB", "MUL", "CONV_2D", "DEPTHWISE_CONV_2D", "ADD", "RESIZE_BILINEAR"],
+  "cpuOnly": true
+}

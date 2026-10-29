@@ -13,3 +13,9 @@ listenai_add_linker_section(
     SLOT ROM
     SORT_KEY "50-ricestep-assets"
 )
+
+include(${CMAKE_CURRENT_LIST_DIR}/pose-config.cmake)
+if(RICESTEP_POSE_LINK_CHECK)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/pose_runtime
+                     ${CMAKE_CURRENT_BINARY_DIR}/pose_runtime)
+endif()

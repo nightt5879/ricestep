@@ -27,9 +27,10 @@ jobs:
           ./scripts/test-motion.ps1 -Compiler clang
           ./scripts/test-pose-image.ps1 -Compiler clang
           ./scripts/test-pose-decode.ps1 -Compiler clang
+          ./scripts/test-pose-resources.ps1 -Compiler clang
       - name: Check offline voice assets and standalone persistence
         run: |
-          node --test --test-reporter=dot tests/native-voice-pack.test.cjs tests/standalone-overlay.test.cjs tests/native-image.test.cjs
+          node --test --test-reporter=dot tests/native-voice-pack.test.cjs tests/standalone-overlay.test.cjs tests/native-image.test.cjs tests/pose-resources.test.cjs tests/setup-pose-source.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Standalone asset tests failed.' }
           ./scripts/test-standalone-storage.ps1 -Compiler clang
       - name: Upload application and rendered preview
