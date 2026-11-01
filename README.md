@@ -1,6 +1,6 @@
 # RiceStep · 肥鱼饭搭子
 
-**2026-11-01 展示版：** 最后准备实拍时设备一直未能完成配网，随后没电关机，本次改用官方桌面模拟器画面与后期角色配音展示 idea。现有 Lua 应用已在本机完成构建与检查，40 秒竖屏视频的可复现工程在 [scripts/video-intro/](scripts/video-intro/README.md)。视频不作为实机验收证据；硬件排查、动作识别研发与独立固件工作继续暂停。接手记录见 [HANDOFF_DORM.md](HANDOFF_DORM.md)。
+**2026-11-01 参赛展示：** 本作品此前已成功部署到 Mini3，角色显示、按键交互、煮饭和米饭奖励有[实机验证记录](docs/verification.md)。这次准备录制参赛视频时未能完成配网，改用官方桌面模拟器画面与后期角色配音展示已实现的交互。40 秒竖屏视频的可复现工程在 [scripts/video-intro/](scripts/video-intro/README.md)；本片不是新的实机录像。硬件排查、动作识别研发与独立固件工作继续暂停。接手记录见 [HANDOFF_DORM.md](HANDOFF_DORM.md)。
 
 源码仓库：https://github.com/nightt5879/ricestep 。本项目为社区二创，非 DeepSeek 官方产品。仓库公开不改变各素材与第三方组件原有的权利及许可。
 
