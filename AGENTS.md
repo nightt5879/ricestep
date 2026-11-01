@@ -1,6 +1,6 @@
 # RiceStep development
 
-- Current user direction (2026-10-30): camera/pose R&D is paused. The immediate task is dorm-PC setup and filming the existing companion/cooking Lua app for Douyin. Read `HANDOFF_DORM.md` first. Do not resume training, install native/ML toolchains, or flash standalone firmware unless the user explicitly resumes that work. Keep setup silent: ordinary deployment can auto-play the greeting after about 2.5 seconds, so defer it until the user confirms the location can have sound. Use existing reviewed clips; preserve saves.
+- Current user direction (2026-11-01): camera/pose R&D remains paused. The board ran out of battery and the user stopped hardware/network troubleshooting, choosing a local, non-hardware demonstration video instead. Read `HANDOFF_DORM.md` first. Build the existing companion/cooking Lua app and use official simulator screenshots plus existing character clips; label the video as simulated footage with post-produced voice. Do not resume hardware troubleshooting, training, native/ML toolchain installation or firmware flashing unless explicitly requested. Preserve saves. Any future deployment still needs the user to confirm the location can have sound because the greeting may auto-play after about 2.5 seconds.
 
 - Use authenticated local `gh` and `git` for GitHub work; do not use GitHub connectors.
 - This is a LingClaw Lua miniapp. Prefer APIs documented in the pinned official SDK; clearly record bounded physical probes for API 5 features absent from the API 4 desktop SDK.

@@ -27,5 +27,60 @@
     "upstreamSha1": "e03e78b1d80b396f1c3358e31251cb31740e1110",
     "sha256": "45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99",
     "directory": "platform-tools"
+  },
+  "video": {
+    "project": "scripts/video-intro/package.json",
+    "npmLock": "scripts/video-intro/package-lock.json",
+    "npmLockSha256": "2007b1671f16db5567da0c12b7baec1522cbf89bd381b7936f2d2324af973fdc",
+    "nodeValidated": "22.22.2",
+    "ffmpeg": {
+      "binarySha256": "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00",
+      "archiveSha256": "8883a3dffbd0a16cf4ef95206ea05283f78908dbfb118f73c83f4951dcc06d77",
+      "version": "6.1.1",
+      "archiveUrl": "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-win32-x64.gz"
+    },
+    "ffprobe": {
+      "binarySha256": "4303ec85855340689b1f8aa5d9c1dc06ef3e3090682de3034edc3fca2b0798d5",
+      "packageVersion": "3.1.0"
+    },
+    "archives": [
+      {
+        "package": "@remotion/cli",
+        "url": "https://registry.npmjs.org/@remotion/cli/-/cli-4.0.484.tgz",
+        "sha256": "166ad5fe1f02148c737fccdc8adb67b88f529cfc2deea01583b0712852c06d59",
+        "version": "4.0.484"
+      },
+      {
+        "package": "remotion",
+        "url": "https://registry.npmjs.org/remotion/-/remotion-4.0.484.tgz",
+        "sha256": "7780fe0f5669444dcf90739b5759ded89bb80ea1a8e7280323e9d520e7eccb92",
+        "version": "4.0.484"
+      },
+      {
+        "package": "react",
+        "url": "https://registry.npmjs.org/react/-/react-19.2.7.tgz",
+        "sha256": "d0065884db7670ffb89046826995cf0d7754a31653d23908532e52671bf83d7d",
+        "version": "19.2.7"
+      },
+      {
+        "package": "react-dom",
+        "url": "https://registry.npmjs.org/react-dom/-/react-dom-19.2.7.tgz",
+        "sha256": "e47bae602149b38b90b452c89e53d2d60639fee09361d90374983a6aac62739e",
+        "version": "19.2.7"
+      },
+      {
+        "package": "ffmpeg-static",
+        "url": "https://registry.npmjs.org/ffmpeg-static/-/ffmpeg-static-5.3.0.tgz",
+        "sha256": "0525c908c27618582a6fb5d4cc70452a2f2d4f50cb3d88b19b16a3c1cc8df25d",
+        "version": "5.3.0"
+      },
+      {
+        "package": "ffprobe-static",
+        "url": "https://registry.npmjs.org/ffprobe-static/-/ffprobe-static-3.1.0.tgz",
+        "sha256": "0193bc86ec086edcb7c3198fe8aca944e4a5d748f63d2d1b4603b26892ebb628",
+        "version": "3.1.0"
+      }
+    ],
+    "note": "Video-only dependencies; no board or ML toolchain. Transitive npm integrity values are pinned in package-lock.json."
   }
 }
