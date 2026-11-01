@@ -1,6 +1,6 @@
 #requires -Version 7.2
 [CmdletBinding()]
-param([switch]$StillsOnly)
+param([switch]$StillsOnly, [string]$VoiceDirectory)
 . (Join-Path $PSScriptRoot 'common.ps1')
 # All rendering is local and silent. No ADB, device, voice server or playback.
 & (Join-Path $PSScriptRoot 'build.ps1')
@@ -10,8 +10,15 @@ $null = New-Item -ItemType Directory -Path $stage -Force
 foreach ($name in @('package.json', 'package-lock.json', 'src.tsx', 'capture.cjs', 'render.cjs', 'design-spec.md')) {
     Copy-Item -LiteralPath (Join-Path $source $name) -Destination (Join-Path $stage $name) -Force
 }
+$resolvedVoiceDirectory = if ($VoiceDirectory) { (Resolve-Path -LiteralPath $VoiceDirectory).Path }
 Push-Location $stage
+$previousVoiceDirectory = $env:FEIYU_VIDEO_VOICE_DIR
 try {
+    if ($VoiceDirectory) {
+        $env:FEIYU_VIDEO_VOICE_DIR = $resolvedVoiceDirectory
+    } else {
+        $env:FEIYU_VIDEO_VOICE_DIR = $null
+    }
     $hash = (Get-FileHash -LiteralPath package-lock.json).Hash
     if ($hash.ToLowerInvariant() -ne $Toolchain.video.npmLockSha256) {
         throw 'Video package lock checksum does not match toolchain.lock.json.'
@@ -36,4 +43,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Official simulator capture failed.' }
     if ($StillsOnly) { & node render.cjs --stills-only } else { & node render.cjs }
     if ($LASTEXITCODE -ne 0) { throw 'Video rendering failed.' }
-} finally { Pop-Location }
+} finally {
+    $env:FEIYU_VIDEO_VOICE_DIR = $previousVoiceDirectory
+    Pop-Location
+}

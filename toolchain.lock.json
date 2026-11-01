@@ -315,9 +315,27 @@
         "fft",
         "inference_imports"
       ],
-      "audioGeneration": "Deferred while user keeps GPU-heavy game running",
-      "voiceMatch": "Not auditioned or accepted by user",
-      "videoAudio": "Existing Xiaoyi clips unchanged"
+      "audioGeneration": "Six video lines generated successfully on RTX 4070 SUPER; no training",
+      "voiceMatch": "Cute/F6 release voice used; subjective user acceptance not recorded",
+      "videoAudio": "Feiyu cute voice; original app Xiaoyi clips unchanged",
+      "record": "docs/feiyu-video-voice.json",
+      "recordSha256": "81781abe59a4e42cde10fc6ca61e125935fa788bcae85c0140d182fb21964f04"
+    },
+    "audioQa": {
+      "package": "openai-whisper",
+      "version": "20250625",
+      "models": [
+        {
+          "model": "base",
+          "url": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt",
+          "sha256": "ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e"
+        },
+        {
+          "model": "small",
+          "url": "https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt",
+          "sha256": "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794"
+        }
+      ]
     }
   }
 }

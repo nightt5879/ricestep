@@ -7,7 +7,8 @@ const out=path.resolve(__dirname,'../output');
 fs.mkdirSync(path.join(out,'qa'),{recursive:true});
 const url=await bundle({entryPoint:path.join(__dirname,'src.tsx'),publicDir:path.join(__dirname,'public')});
 const composition=await selectComposition({serveUrl:url,id:'FeiyuIntro',browserExecutable:chrome});
-const frames=[60,130,180,240,390,465,570,660,780,840,960,1020,1080,1170];
+const timeline=require('./timeline.json');
+const frames=timeline.shots.flatMap(s=>[s.from+Math.min(30,s.duration-1),s.from+Math.floor(s.duration*.6),s.from+s.duration-1]);
 if(!process.argv.includes('--video-only'))for(const frame of frames){await renderStill({serveUrl:url,composition,frame,output:path.join(out,'qa','f'+frame+'.png'),browserExecutable:chrome});console.log('Still '+frame);}
 if(process.argv.includes('--stills-only'))return;
 let last=-1;

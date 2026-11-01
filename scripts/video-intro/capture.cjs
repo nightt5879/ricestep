@@ -36,7 +36,28 @@ if(!fs.existsSync(png))throw Error('Missing '+job.name);console.log('Captured '+
 }
 (async()=>{let idx=0;await Promise.all(Array.from({length:4},async()=>{while(idx<jobs.length)await capture(jobs[idx++]);}));
 fs.writeFileSync(path.join(__dirname,'capture-manifest.json'),JSON.stringify({source:'Unmodified production Lua, official SDK v0.1.0 API4 headless; isolated simulated inventory; no device',jobs},null,2));
-fs.mkdirSync(path.join(__dirname,'public/voice'),{recursive:true});for(const name of ['hello','perfect','feed','burnt','remember_burnt','focus_start'])fs.copyFileSync(path.join(root,'assets/audio/v1',name+'.mp3'),path.join(__dirname,'public/voice',name+'.mp3'));
+const crypto=require('crypto');
+const voiceRoot=process.env.FEIYU_VIDEO_VOICE_DIR?path.resolve(process.env.FEIYU_VIDEO_VOICE_DIR):path.join(root,'assets/audio/v1');
+const voiceManifest=JSON.parse(fs.readFileSync(path.join(voiceRoot,'manifest.json'),'utf8').replace(/^\uFEFF/,''));
+const original=JSON.parse(fs.readFileSync(path.join(root,'assets/audio/v1/manifest.json'),'utf8'));
+const ids=['hello','perfect','feed','burnt','remember_burnt','focus_start'];
+const offsets=[15,66,18,60,39,3];
+const durations=[150,210,180,210,180,120,150];
+const voice=[];
+fs.mkdirSync(path.join(__dirname,'public/voice'),{recursive:true});
+for(const [i,name] of ids.entries()){
+ const clip=voiceManifest.clips.find(c=>c.id===name),expected=original.clips.find(c=>c.id===name);
+ if(!clip||clip.file!==name+'.mp3'||clip.text!==expected.text||!Number.isFinite(clip.duration_ms)||clip.duration_ms<=0||clip.duration_ms>15000)throw Error('Invalid video voice manifest: '+name);
+ const bytes=fs.readFileSync(path.join(voiceRoot,clip.file));
+ if(crypto.createHash('sha256').update(bytes).digest('hex')!==clip.sha256)throw Error('Video voice checksum mismatch: '+name);
+ fs.writeFileSync(path.join(__dirname,'public/voice',clip.file),bytes);
+ const frames=Math.ceil(clip.duration_ms/1000*30);
+ durations[i]=Math.max(durations[i],offsets[i]+frames+12);
+ voice.push({shot:i,offset:offsets[i],clip:name,duration:frames+2});
+}
+let from=0;const shots=['intro','cook','feed','burnt','memory','poses','outro'].map((id,i)=>{const s={id,from,duration:durations[i]};from+=durations[i];return s;});
+fs.writeFileSync(path.join(__dirname,'timeline.json'),JSON.stringify({shots,voice,totalFrames:from},null,2));
+fs.writeFileSync(path.join(__dirname,'public/voice/manifest.json'),JSON.stringify(voiceManifest,null,2));
 const lua=fs.readFileSync(path.join(root,'app/character.lua'),'utf8');const high=lua.split('local character_high=')[1].split('local character_low=')[0];
 const pal=['#FFF5E5','#17233e','#355798','#73b0de','#c4e0f2','#ffead6','#f9fbff','#d68f98','#e3ba60'];
 let n=0;for(const m of high.matchAll(/\{(\d+),(\d+),\[=\[([\s\S]*?)\]=\]\}/g)){let shapes='';let s=m[3];for(let i=0;i<s.length;i+=5){let [x,y,w,h,c]=[...s.slice(i,i+5)].map(v=>v.charCodeAt(0)-33);shapes+=`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${pal[c]}"/>`;}

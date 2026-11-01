@@ -5,5 +5,7 @@
 *.yml text eol=lf
 *.ps1 text eol=lf
 *.cjs text eol=lf
+*.tsx text eol=lf
+*.py text eol=lf
 docs/feiyu-inference-requirements.txt text eol=lf
 *.png binary

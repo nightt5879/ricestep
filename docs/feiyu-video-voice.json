@@ -1,0 +1,208 @@
+{
+  "date": "2026-11-01",
+  "scope": "Video-only AI character voice; existing app MP3 and saves unchanged",
+  "voicePack": {
+    "version": 1,
+    "provider": "Local FeiyuVoice-CosyVoice3",
+    "voice": "cute F6",
+    "modelRepository": "Esmerubphire/FeiyuVoice-CosyVoice3",
+    "checkpointSha256": "31a87a0f83ae9987285e115dd0d2048a0f52db44fa40d48e8da1cfefea12affc",
+    "referenceSha256": "cefa06b7f45479130169d154f84a32bc89d90585b7de50f96e36533c5ebe819e",
+    "seed": 42,
+    "processing": "FFmpeg loudnorm I=-18 TP=-2 LRA=9; no pitch or speed change",
+    "clips": [
+      {
+        "id": "feed",
+        "file": "feed.mp3",
+        "text": "啊呜，好吃。再一口，就一口。",
+        "duration_ms": 4872,
+        "bytes": 117549,
+        "sha256": "aff07c013859ab49af861a341cf6dd71cea281c93df8d847457d2f5bebd30426",
+        "sample_rate": 48000,
+        "channels": 1,
+        "sourceWavSha256": "ac9d67e6f381d82d522ae53d34f83ccc60743b7aba649ab944ebde1be72f6775"
+      },
+      {
+        "id": "hello",
+        "file": "hello.mp3",
+        "text": "你来啦。我在，等饭。",
+        "duration_ms": 2112,
+        "bytes": 51309,
+        "sha256": "4f27f63b9cdd906b26f1f6b0054970a7babf5dca62d24cdbf28b1c23e10b4ee8",
+        "sample_rate": 48000,
+        "channels": 1,
+        "sourceWavSha256": "fde8f0efe6851dfaee708c2fd52fed99d21e4c11be5dd2575f3ff9ea0b3f0fe9"
+      },
+      {
+        "id": "perfect",
+        "file": "perfect.mp3",
+        "text": "诶嘿，香的！这碗，先归我。",
+        "duration_ms": 3264,
+        "bytes": 78957,
+        "sha256": "74abe480e6804009d8af184c4639ee77d9b75a4144a8758d1462027c88856141",
+        "sample_rate": 48000,
+        "channels": 1,
+        "sourceWavSha256": "1e356123e0f9f7cbfafd2636eb8a8891c3d182327484e3167519e2fc8f83d6b2"
+      },
+      {
+        "id": "burnt",
+        "file": "burnt.mp3",
+        "text": "呃，饭好像，晒黑了。是锅巴！",
+        "duration_ms": 5904,
+        "bytes": 142317,
+        "sha256": "5570d49576cd636c79dd08b9489e6550df27fbb9b1bc85095c84ae4f9b1e5876",
+        "sample_rate": 48000,
+        "channels": 1,
+        "sourceWavSha256": "eb00845c351241620b0e7fbeff9f8d741780e979095ac1d4fd70a422e7d80a28"
+      },
+      {
+        "id": "remember_burnt",
+        "file": "remember_burnt.mp3",
+        "text": "这次我盯着锅。嗯，盯着。",
+        "duration_ms": 2784,
+        "bytes": 67437,
+        "sha256": "7da342f284d2b58e2ce80e65d583bd65be4bb57237003473ed05a77d1870cd48",
+        "sample_rate": 48000,
+        "channels": 1,
+        "sourceWavSha256": "d04f0730df12947841d02c2655203a912985d03d170987e8d27a65e9f2782303"
+      },
+      {
+        "id": "focus_start",
+        "file": "focus_start.mp3",
+        "text": "你认真忙。我认真，等开饭。",
+        "duration_ms": 2520,
+        "bytes": 61101,
+        "sha256": "d459af020737c08fac057f775147946dee708f40bc8b34bbda6c53bff22ce8be",
+        "sample_rate": 48000,
+        "channels": 1,
+        "sourceWavSha256": "1d9ea472a7116965532ef20251cceef3c39bb81e11c81224fc00de83ef771f94"
+      }
+    ]
+  },
+  "generation": {
+    "checkpointSha256": "31a87a0f83ae9987285e115dd0d2048a0f52db44fa40d48e8da1cfefea12affc",
+    "referenceSha256": "cefa06b7f45479130169d154f84a32bc89d90585b7de50f96e36533c5ebe819e",
+    "inference": {
+      "mode": "zero_shot",
+      "seed": 42,
+      "speed": 1,
+      "fp16": false,
+      "stream": false,
+      "prompt_prefix": "You are a helpful assistant.<|endofprompt|>"
+    },
+    "runtime": {
+      "backend": "cuda",
+      "device": "cuda:0",
+      "torch": "2.11.0+cu128",
+      "hip": null,
+      "cuda": "12.8",
+      "xpu": null,
+      "precision": "float32",
+      "gpu": "NVIDIA GeForce RTX 4070 SUPER",
+      "validation": "actual_worker_runtime; not a hardware certification"
+    },
+    "actualTextFrontend": "",
+    "note": "Optional WeText normalization asset download returned 403; upstream used raw text for these six ordinary Chinese lines."
+  },
+  "asr": {
+    "purpose": "Auxiliary transcription; exclamations and homophones can differ. Not subjective voice acceptance.",
+    "base": [
+      {
+        "id": "feed",
+        "text": "好吃,再一口,就一口"
+      },
+      {
+        "id": "hello",
+        "text": "你來了我在等飯"
+      },
+      {
+        "id": "perfect",
+        "text": "嘿嘿香的这碗先归我"
+      },
+      {
+        "id": "burnt",
+        "text": "呃,犯好像晒黑了是,锅吧"
+      },
+      {
+        "id": "remember_burnt",
+        "text": "這次我盯著鍋,恩盯著"
+      },
+      {
+        "id": "focus_start",
+        "text": "你認真嗎?我認真等開飯"
+      }
+    ],
+    "small": [
+      {
+        "id": "feed",
+        "text": "哦!好吃,再一口,就一口!"
+      },
+      {
+        "id": "burnt",
+        "text": "呃,飯好像曬黑了。是鍋吧。"
+      },
+      {
+        "id": "focus_start",
+        "text": "你认真忙 我认真等开饭"
+      }
+    ]
+  },
+  "video": {
+    "frames": 1240,
+    "seconds": 41.333333333333336,
+    "bytes": 4693103,
+    "sha256": "28927b8aa8a65ccf52f206a552832de2d932360ed92da3f447ddad911ea9da27",
+    "maxVolumeDbfs": -6.2,
+    "decoded": true,
+    "audio": [
+      {
+        "clip": "hello",
+        "expectedFromFrame": 15,
+        "durationMs": 2112,
+        "offsetMilliseconds": 42.666666666666664,
+        "offsetFrames": 1.28,
+        "correlation": 0.9999640656463211
+      },
+      {
+        "clip": "perfect",
+        "expectedFromFrame": 216,
+        "durationMs": 3264,
+        "offsetMilliseconds": 42.666666666666664,
+        "offsetFrames": 1.28,
+        "correlation": 0.9999724746417555
+      },
+      {
+        "clip": "feed",
+        "expectedFromFrame": 378,
+        "durationMs": 4872,
+        "offsetMilliseconds": 42.666666666666664,
+        "offsetFrames": 1.28,
+        "correlation": 0.9999411127024737
+      },
+      {
+        "clip": "burnt",
+        "expectedFromFrame": 600,
+        "durationMs": 5904,
+        "offsetMilliseconds": 42.666666666666664,
+        "offsetFrames": 1.28,
+        "correlation": 0.9999599535166886
+      },
+      {
+        "clip": "remember_burnt",
+        "expectedFromFrame": 829,
+        "durationMs": 2784,
+        "offsetMilliseconds": 42.333333333333336,
+        "offsetFrames": 1.27,
+        "correlation": 0.9999877700284575
+      },
+      {
+        "clip": "focus_start",
+        "expectedFromFrame": 973,
+        "durationMs": 2520,
+        "offsetMilliseconds": 42.333333333333336,
+        "offsetFrames": 1.27,
+        "correlation": 0.9999764928499322
+      }
+    ]
+  }
+}
