@@ -1,6 +1,6 @@
-# 肥鱼饭搭子：无实机介绍视频
+# 肥鱼饭搭子：参赛展示视频
 
-用户于 2026-11-01 停止实机排查，改为制作无实机项目介绍。默认输出 40 秒、1080×1920、30 fps 的 H.264/AAC 视频，使用现有角色 MP3，不生成新配音或新角色。
+作品此前已经在 Mini3 成功运行，角色显示、按键、煮饭与米饭奖励有实机验证记录。本次录制时无法完成配网，用户于 2026-11-01 决定使用桌面模拟器展示已经实现的玩法。默认输出 40 秒、1080×1920、30 fps 的 H.264/AAC 视频，使用现有角色 MP3；本工程尚未换入新大肥鱼声线。
 
 在仓库根目录执行 pwsh -File scripts/render-intro.ps1。只做静帧可加 -StillsOnly。依赖隔离在 work/filming/video/，输出在 work/filming/output/。需要已安装的官方 SDK（setup.ps1）、Node 20+、本机 Chrome；渲染脚本使用 C:/Program Files/Google/Chrome/Application/chrome.exe，其他安装位置需调整 render.cjs。
 
